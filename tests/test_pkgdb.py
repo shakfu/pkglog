@@ -13,6 +13,11 @@ from pkgdb import (
     get_db_connection,
     init_db,
     load_packages,
+    add_package,
+    remove_package,
+    get_packages,
+    import_packages_from_file,
+    load_packages_from_file,
     store_stats,
     get_latest_stats,
     get_package_history,
@@ -120,6 +125,137 @@ class TestDatabaseOperations:
         )
         assert cursor.fetchone()["count"] == 1
         conn.close()
+
+    def test_init_db_creates_packages_table(self, temp_db):
+        """init_db should create the packages table."""
+        conn = get_db_connection(temp_db)
+        init_db(conn)
+
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='packages'"
+        )
+        result = cursor.fetchone()
+        assert result is not None
+        assert result["name"] == "packages"
+        conn.close()
+
+
+class TestPackageManagement:
+    """Tests for package management functions."""
+
+    def test_add_package_success(self, db_conn):
+        """add_package should insert a package and return True."""
+        result = add_package(db_conn, "test-package")
+        assert result is True
+
+        cursor = db_conn.execute(
+            "SELECT package_name FROM packages WHERE package_name = ?",
+            ("test-package",)
+        )
+        row = cursor.fetchone()
+        assert row is not None
+        assert row["package_name"] == "test-package"
+
+    def test_add_package_duplicate(self, db_conn):
+        """add_package should return False for duplicate package."""
+        add_package(db_conn, "test-package")
+        result = add_package(db_conn, "test-package")
+        assert result is False
+
+        cursor = db_conn.execute(
+            "SELECT COUNT(*) as count FROM packages WHERE package_name = ?",
+            ("test-package",)
+        )
+        assert cursor.fetchone()["count"] == 1
+
+    def test_remove_package_success(self, db_conn):
+        """remove_package should delete a package and return True."""
+        add_package(db_conn, "test-package")
+        result = remove_package(db_conn, "test-package")
+        assert result is True
+
+        cursor = db_conn.execute(
+            "SELECT COUNT(*) as count FROM packages WHERE package_name = ?",
+            ("test-package",)
+        )
+        assert cursor.fetchone()["count"] == 0
+
+    def test_remove_package_not_found(self, db_conn):
+        """remove_package should return False if package doesn't exist."""
+        result = remove_package(db_conn, "nonexistent")
+        assert result is False
+
+    def test_get_packages_empty(self, db_conn):
+        """get_packages should return empty list when no packages."""
+        packages = get_packages(db_conn)
+        assert packages == []
+
+    def test_get_packages_returns_list(self, db_conn):
+        """get_packages should return list of package names."""
+        add_package(db_conn, "package-b")
+        add_package(db_conn, "package-a")
+        add_package(db_conn, "package-c")
+
+        packages = get_packages(db_conn)
+        assert packages == ["package-a", "package-b", "package-c"]  # Sorted
+
+    def test_import_packages_from_yaml(self, db_conn, temp_packages_file):
+        """import_packages_from_file should import packages from YAML."""
+        added, skipped = import_packages_from_file(db_conn, temp_packages_file)
+        assert added == 2
+        assert skipped == 0
+
+        packages = get_packages(db_conn)
+        assert "package-a" in packages
+        assert "package-b" in packages
+
+    def test_import_packages_skips_duplicates(self, db_conn, temp_packages_file):
+        """import_packages_from_file should skip existing packages."""
+        add_package(db_conn, "package-a")
+
+        added, skipped = import_packages_from_file(db_conn, temp_packages_file)
+        assert added == 1
+        assert skipped == 1
+
+    def test_load_packages_from_text_file(self):
+        """load_packages_from_file should parse plain text files."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("requests\n")
+            f.write("flask\n")
+            f.write("# this is a comment\n")
+            f.write("  django  \n")
+            f.write("\n")  # empty line
+            path = f.name
+
+        try:
+            packages = load_packages_from_file(path)
+            assert packages == ["requests", "flask", "django"]
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    def test_load_packages_from_json_list(self):
+        """load_packages_from_file should parse JSON array."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(["requests", "flask"], f)
+            path = f.name
+
+        try:
+            packages = load_packages_from_file(path)
+            assert packages == ["requests", "flask"]
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    def test_load_packages_from_json_object(self):
+        """load_packages_from_file should parse JSON object with packages key."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump({"packages": ["requests", "flask"]}, f)
+            path = f.name
+
+        try:
+            packages = load_packages_from_file(path)
+            assert packages == ["requests", "flask"]
+        finally:
+            Path(path).unlink(missing_ok=True)
 
 
 class TestLoadPackages:
@@ -627,8 +763,132 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "usage:" in captured.out.lower() or "Available commands" in captured.out
 
-    def test_main_fetch_command(self, temp_db, temp_packages_file):
-        """fetch command should fetch and store stats."""
+    def test_main_add_command(self, temp_db, capsys):
+        """add command should add a package to tracking."""
+        with patch("sys.argv", ["pkgdb", "-d", temp_db, "add", "requests"]):
+            main()
+
+        captured = capsys.readouterr()
+        assert "Added" in captured.out
+        assert "requests" in captured.out
+
+        conn = get_db_connection(temp_db)
+        packages = get_packages(conn)
+        conn.close()
+        assert "requests" in packages
+
+    def test_main_add_command_duplicate(self, temp_db, capsys):
+        """add command should indicate when package already tracked."""
+        conn = get_db_connection(temp_db)
+        init_db(conn)
+        add_package(conn, "requests")
+        conn.close()
+
+        with patch("sys.argv", ["pkgdb", "-d", temp_db, "add", "requests"]):
+            main()
+
+        captured = capsys.readouterr()
+        assert "already" in captured.out
+
+    def test_main_remove_command(self, temp_db, capsys):
+        """remove command should remove a package from tracking."""
+        conn = get_db_connection(temp_db)
+        init_db(conn)
+        add_package(conn, "requests")
+        conn.close()
+
+        with patch("sys.argv", ["pkgdb", "-d", temp_db, "remove", "requests"]):
+            main()
+
+        captured = capsys.readouterr()
+        assert "Removed" in captured.out
+        assert "requests" in captured.out
+
+        conn = get_db_connection(temp_db)
+        packages = get_packages(conn)
+        conn.close()
+        assert "requests" not in packages
+
+    def test_main_remove_command_not_found(self, temp_db, capsys):
+        """remove command should indicate when package not tracked."""
+        conn = get_db_connection(temp_db)
+        init_db(conn)
+        conn.close()
+
+        with patch("sys.argv", ["pkgdb", "-d", temp_db, "remove", "nonexistent"]):
+            main()
+
+        captured = capsys.readouterr()
+        assert "was not" in captured.out
+
+    def test_main_list_command_empty(self, temp_db, capsys):
+        """list command should indicate when no packages tracked."""
+        conn = get_db_connection(temp_db)
+        init_db(conn)
+        conn.close()
+
+        with patch("sys.argv", ["pkgdb", "-d", temp_db, "list"]):
+            main()
+
+        captured = capsys.readouterr()
+        assert "No packages" in captured.out
+
+    def test_main_list_command_with_packages(self, temp_db, capsys):
+        """list command should display tracked packages."""
+        conn = get_db_connection(temp_db)
+        init_db(conn)
+        add_package(conn, "requests")
+        add_package(conn, "flask")
+        conn.close()
+
+        with patch("sys.argv", ["pkgdb", "-d", temp_db, "list"]):
+            main()
+
+        captured = capsys.readouterr()
+        assert "requests" in captured.out
+        assert "flask" in captured.out
+        assert "Tracking 2 packages" in captured.out
+
+    def test_main_import_command(self, temp_db, temp_packages_file, capsys):
+        """import command should import packages from YAML file."""
+        conn = get_db_connection(temp_db)
+        init_db(conn)
+        conn.close()
+
+        with patch("sys.argv", ["pkgdb", "-d", temp_db, "import", temp_packages_file]):
+            main()
+
+        captured = capsys.readouterr()
+        assert "Imported 2 packages" in captured.out
+
+        conn = get_db_connection(temp_db)
+        packages = get_packages(conn)
+        conn.close()
+        assert "package-a" in packages
+        assert "package-b" in packages
+
+    def test_main_import_command_file_not_found(self, temp_db, capsys):
+        """import command should handle missing file."""
+        conn = get_db_connection(temp_db)
+        init_db(conn)
+        conn.close()
+
+        with patch("sys.argv", ["pkgdb", "-d", temp_db, "import", "/nonexistent/file.yml"]):
+            main()
+
+        captured = capsys.readouterr()
+        assert "File not found" in captured.out
+
+    def test_main_fetch_command(self, temp_db):
+        """fetch command should fetch and store stats for tracked packages."""
+        # First add packages to track
+        conn = get_db_connection(temp_db)
+        init_db(conn)
+        conn.execute("INSERT INTO packages (package_name, added_date) VALUES ('package-a', '2024-01-01')")
+        conn.execute("INSERT INTO packages (package_name, added_date) VALUES ('package-b', '2024-01-01')")
+        conn.commit()
+        conn.close()
+
         recent_response = json.dumps({
             "data": {"last_day": 100, "last_week": 700, "last_month": 3000}
         })
@@ -636,7 +896,7 @@ class TestCLI:
             "data": [{"category": "without_mirrors", "downloads": 50000}]
         })
 
-        with patch("sys.argv", ["pkgdb", "-d", temp_db, "-p", temp_packages_file, "fetch"]):
+        with patch("sys.argv", ["pkgdb", "-d", temp_db, "fetch"]):
             with patch("pkgdb.pypistats.recent", return_value=recent_response):
                 with patch("pkgdb.pypistats.overall", return_value=overall_response):
                     main()
@@ -646,20 +906,33 @@ class TestCLI:
         assert cursor.fetchone()["count"] == 2
         conn.close()
 
-    def test_main_list_command_empty_db(self, temp_db, capsys):
-        """list command should indicate when database is empty."""
+    def test_main_fetch_command_no_packages(self, temp_db, capsys):
+        """fetch command should prompt to add packages when none tracked."""
         conn = get_db_connection(temp_db)
         init_db(conn)
         conn.close()
 
-        with patch("sys.argv", ["pkgdb", "-d", temp_db, "list"]):
+        with patch("sys.argv", ["pkgdb", "-d", temp_db, "fetch"]):
+            main()
+
+        captured = capsys.readouterr()
+        assert "No packages" in captured.out
+        assert "pkgdb add" in captured.out or "pkgdb import" in captured.out
+
+    def test_main_show_command_empty_db(self, temp_db, capsys):
+        """show command should indicate when database is empty."""
+        conn = get_db_connection(temp_db)
+        init_db(conn)
+        conn.close()
+
+        with patch("sys.argv", ["pkgdb", "-d", temp_db, "show"]):
             main()
 
         captured = capsys.readouterr()
         assert "No data" in captured.out or "fetch" in captured.out.lower()
 
-    def test_main_list_command_with_data(self, temp_db, capsys):
-        """list command should display stats from database."""
+    def test_main_show_command_with_data(self, temp_db, capsys):
+        """show command should display stats from database."""
         conn = get_db_connection(temp_db)
         init_db(conn)
         conn.execute("""
@@ -670,7 +943,7 @@ class TestCLI:
         conn.commit()
         conn.close()
 
-        with patch("sys.argv", ["pkgdb", "-d", temp_db, "list"]):
+        with patch("sys.argv", ["pkgdb", "-d", temp_db, "show"]):
             main()
 
         captured = capsys.readouterr()

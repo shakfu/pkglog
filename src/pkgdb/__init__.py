@@ -18,7 +18,11 @@ import webbrowser
 
 import pypistats  # type: ignore[import-untyped]
 import yaml
+from tabulate import tabulate
 from typing import Any
+
+
+__version__ = "0.1.4"
 
 
 DEFAULT_PACKAGES_FILE = "packages.yml"
@@ -57,6 +61,13 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
     """)
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS packages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            package_name TEXT NOT NULL UNIQUE,
+            added_date TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_package_name
         ON package_stats(package_name)
     """)
@@ -73,6 +84,98 @@ def load_packages(packages_file: str) -> list[str]:
         data = yaml.safe_load(f)
     result: list[str] = data.get("published", [])
     return result
+
+
+def add_package(conn: sqlite3.Connection, name: str) -> bool:
+    """Add a package to the tracking database.
+
+    Returns True if package was added, False if it already exists.
+    """
+    added_date = datetime.now().strftime("%Y-%m-%d")
+    try:
+        conn.execute(
+            "INSERT INTO packages (package_name, added_date) VALUES (?, ?)",
+            (name, added_date),
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+def remove_package(conn: sqlite3.Connection, name: str) -> bool:
+    """Remove a package from the tracking database.
+
+    Returns True if package was removed, False if it didn't exist.
+    """
+    cursor = conn.execute(
+        "DELETE FROM packages WHERE package_name = ?",
+        (name,),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def get_packages(conn: sqlite3.Connection) -> list[str]:
+    """Get list of tracked package names from the database."""
+    cursor = conn.execute(
+        "SELECT package_name FROM packages ORDER BY package_name"
+    )
+    return [row["package_name"] for row in cursor.fetchall()]
+
+
+def load_packages_from_file(file_path: str) -> list[str]:
+    """Load package names from a file (YAML, JSON, or plain text).
+
+    Supports:
+    - YAML (.yml, .yaml): expects 'published' key with list of packages
+    - JSON (.json): expects list of strings or object with 'packages'/'published' key
+    - Plain text: one package name per line (comments with # supported)
+    """
+    path = Path(file_path)
+    suffix = path.suffix.lower()
+
+    with open(file_path) as f:
+        content = f.read()
+
+    if suffix in (".yml", ".yaml"):
+        data = yaml.safe_load(content)
+        if isinstance(data, dict):
+            return data.get("published", []) or data.get("packages", []) or []
+        return []
+
+    if suffix == ".json":
+        data = json.loads(content)
+        if isinstance(data, list):
+            return [str(p) for p in data]
+        if isinstance(data, dict):
+            return data.get("packages", []) or data.get("published", []) or []
+        return []
+
+    # Plain text: one package per line, strip whitespace, skip empty/comments
+    packages = []
+    for line in content.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            packages.append(line)
+    return packages
+
+
+def import_packages_from_file(conn: sqlite3.Connection, file_path: str) -> tuple[int, int]:
+    """Import packages from a file into the database.
+
+    Supports YAML, JSON, and plain text formats.
+    Returns tuple of (added_count, skipped_count).
+    """
+    packages = load_packages_from_file(file_path)
+    added = 0
+    skipped = 0
+    for pkg in packages:
+        if add_package(conn, pkg):
+            added += 1
+        else:
+            skipped += 1
+    return added, skipped
 
 
 def fetch_package_stats(package_name: str) -> dict[str, Any] | None:
@@ -1024,11 +1127,17 @@ def generate_package_html_report(
 
 def cmd_fetch(args: argparse.Namespace) -> None:
     """Fetch command: download stats and store in database."""
-    packages = load_packages(args.packages)
-    print(f"Loaded {len(packages)} packages from {args.packages}")
-
     conn = get_db_connection(args.database)
     init_db(conn)
+
+    packages = get_packages(conn)
+    if not packages:
+        print("No packages are being tracked.")
+        print("Add packages with 'pkgdb add <name>' or import from YAML with 'pkgdb import'.")
+        conn.close()
+        return
+
+    print(f"Fetching stats for {len(packages)} tracked packages...")
 
     for package in packages:
         print(f"Fetching stats for {package}...")
@@ -1105,8 +1214,8 @@ def cmd_update(args: argparse.Namespace) -> None:
     cmd_report(args)
 
 
-def cmd_list(args: argparse.Namespace) -> None:
-    """List command: show stored statistics."""
+def cmd_show(args: argparse.Namespace) -> None:
+    """Show command: display stored statistics in terminal."""
     conn = get_db_connection(args.database)
     init_db(conn)
 
@@ -1118,30 +1227,99 @@ def cmd_list(args: argparse.Namespace) -> None:
         print("No data in database. Run 'fetch' first.")
         return
 
-    print(
-        f"{'Rank':<5} {'Package':<20} {'Total':>12} {'Month':>10} "
-        f"{'Week':>8} {'Day':>7} {'Trend':>7} {'Growth':>8}"
-    )
-    print("-" * 82)
-
+    rows = []
     for i, s in enumerate(stats, 1):
         pkg = s["package_name"]
         pkg_history = history.get(pkg, [])
         totals = [h["total"] or 0 for h in pkg_history]
         sparkline = make_sparkline(totals, width=7)
 
-        # Format growth
         growth_str = ""
         if s.get("month_growth") is not None:
             g = s["month_growth"]
             sign = "+" if g >= 0 else ""
             growth_str = f"{sign}{g:.1f}%"
 
-        print(
-            f"{i:<5} {pkg:<20} {s['total'] or 0:>12,} "
-            f"{s['last_month'] or 0:>10,} {s['last_week'] or 0:>8,} "
-            f"{s['last_day'] or 0:>7,} {sparkline:>7} {growth_str:>8}"
-        )
+        rows.append([
+            i,
+            pkg,
+            f"{s['total'] or 0:,}",
+            f"{s['last_month'] or 0:,}",
+            f"{s['last_week'] or 0:,}",
+            f"{s['last_day'] or 0:,}",
+            sparkline,
+            growth_str,
+        ])
+
+    headers = ["#", "Package", "Total", "Month", "Week", "Day", "Trend", "Growth"]
+    print(tabulate(rows, headers=headers, tablefmt="simple"))
+
+
+def cmd_list(args: argparse.Namespace) -> None:
+    """List command: show tracked packages."""
+    conn = get_db_connection(args.database)
+    init_db(conn)
+
+    packages = get_packages(conn)
+
+    if not packages:
+        conn.close()
+        print("No packages are being tracked.")
+        print("Add packages with 'pkgdb add <name>' or import from YAML with 'pkgdb import'.")
+        return
+
+    # Get added dates for each package
+    cursor = conn.execute(
+        "SELECT package_name, added_date FROM packages ORDER BY package_name"
+    )
+    pkg_data = {row["package_name"]: row["added_date"] for row in cursor.fetchall()}
+    conn.close()
+
+    print(f"Tracking {len(packages)} packages:\n")
+
+    rows = [[pkg, pkg_data.get(pkg, "")] for pkg in packages]
+    headers = ["Package", "Added"]
+    print(tabulate(rows, headers=headers, tablefmt="simple"))
+
+
+def cmd_add(args: argparse.Namespace) -> None:
+    """Add command: add a package to tracking."""
+    conn = get_db_connection(args.database)
+    init_db(conn)
+
+    if add_package(conn, args.name):
+        print(f"Added '{args.name}' to tracking.")
+    else:
+        print(f"Package '{args.name}' is already being tracked.")
+
+    conn.close()
+
+
+def cmd_remove(args: argparse.Namespace) -> None:
+    """Remove command: remove a package from tracking."""
+    conn = get_db_connection(args.database)
+    init_db(conn)
+
+    if remove_package(conn, args.name):
+        print(f"Removed '{args.name}' from tracking.")
+    else:
+        print(f"Package '{args.name}' was not being tracked.")
+
+    conn.close()
+
+
+def cmd_import(args: argparse.Namespace) -> None:
+    """Import command: import packages from file (YAML, JSON, or text)."""
+    conn = get_db_connection(args.database)
+    init_db(conn)
+
+    try:
+        added, skipped = import_packages_from_file(conn, args.file)
+        print(f"Imported {added} packages ({skipped} already tracked).")
+    except FileNotFoundError:
+        print(f"File not found: {args.file}")
+
+    conn.close()
 
 
 def cmd_history(args: argparse.Namespace) -> None:
@@ -1156,17 +1334,20 @@ def cmd_history(args: argparse.Namespace) -> None:
         print(f"No data found for package '{args.package}'.")
         return
 
-    print(f"Historical stats for {args.package}")
-    print(f"{'Date':<12} {'Total':>12} {'Month':>10} {'Week':>10} {'Day':>8}")
-    print("-" * 55)
+    print(f"Historical stats for {args.package}\n")
 
-    # Reverse to show oldest first
+    rows = []
     for h in reversed(history):
-        print(
-            f"{h['fetch_date']:<12} {h['total'] or 0:>12,} "
-            f"{h['last_month'] or 0:>10,} {h['last_week'] or 0:>10,} "
-            f"{h['last_day'] or 0:>8,}"
-        )
+        rows.append([
+            h["fetch_date"],
+            f"{h['total'] or 0:,}",
+            f"{h['last_month'] or 0:,}",
+            f"{h['last_week'] or 0:,}",
+            f"{h['last_day'] or 0:,}",
+        ])
+
+    headers = ["Date", "Total", "Month", "Week", "Day"]
+    print(tabulate(rows, headers=headers, tablefmt="simple"))
 
 
 def cmd_export(args: argparse.Namespace) -> None:
@@ -1256,21 +1437,64 @@ def main() -> None:
         default=DEFAULT_DB_FILE,
         help=f"SQLite database file (default: {DEFAULT_DB_FILE})",
     )
-    parser.add_argument(
-        "-p",
-        "--packages",
-        default=DEFAULT_PACKAGES_FILE,
-        help=f"Packages YAML file (default: {DEFAULT_PACKAGES_FILE})",
-    )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # add command
+    add_parser = subparsers.add_parser(
+        "add",
+        help="Add a package to tracking",
+    )
+    add_parser.add_argument(
+        "name",
+        help="Package name to add",
+    )
+    add_parser.set_defaults(func=cmd_add)
+
+    # remove command
+    remove_parser = subparsers.add_parser(
+        "remove",
+        help="Remove a package from tracking",
+    )
+    remove_parser.add_argument(
+        "name",
+        help="Package name to remove",
+    )
+    remove_parser.set_defaults(func=cmd_remove)
+
+    # list command
+    list_parser = subparsers.add_parser(
+        "list",
+        help="List tracked packages",
+    )
+    list_parser.set_defaults(func=cmd_list)
+
+    # import command
+    import_parser = subparsers.add_parser(
+        "import",
+        help="Import packages from file (YAML, JSON, or text)",
+    )
+    import_parser.add_argument(
+        "file",
+        nargs="?",
+        default=DEFAULT_PACKAGES_FILE,
+        help=f"File to import from - supports .yml, .json, or plain text (default: {DEFAULT_PACKAGES_FILE})",
+    )
+    import_parser.set_defaults(func=cmd_import)
 
     # fetch command
     fetch_parser = subparsers.add_parser(
         "fetch",
-        help="Fetch download statistics from PyPI",
+        help="Fetch download statistics from PyPI for tracked packages",
     )
     fetch_parser.set_defaults(func=cmd_fetch)
+
+    # show command (was 'list')
+    show_parser = subparsers.add_parser(
+        "show",
+        help="Display download stats in terminal",
+    )
+    show_parser.set_defaults(func=cmd_show)
 
     # report command
     report_parser = subparsers.add_parser(
@@ -1296,13 +1520,6 @@ def main() -> None:
     )
     report_parser.set_defaults(func=cmd_report)
 
-    # list command
-    list_parser = subparsers.add_parser(
-        "list",
-        help="List stored statistics",
-    )
-    list_parser.set_defaults(func=cmd_list)
-
     # history command
     history_parser = subparsers.add_parser(
         "history",
@@ -1320,6 +1537,17 @@ def main() -> None:
         help="Number of days to show (default: 30)",
     )
     history_parser.set_defaults(func=cmd_history)
+
+    # stats command
+    stats_parser = subparsers.add_parser(
+        "stats",
+        help="Show detailed stats for a package (Python versions, OS breakdown)",
+    )
+    stats_parser.add_argument(
+        "package",
+        help="Package name to show detailed stats for",
+    )
+    stats_parser.set_defaults(func=cmd_stats)
 
     # export command
     export_parser = subparsers.add_parser(
@@ -1339,17 +1567,6 @@ def main() -> None:
         help="Output file (default: stdout)",
     )
     export_parser.set_defaults(func=cmd_export)
-
-    # stats command
-    stats_parser = subparsers.add_parser(
-        "stats",
-        help="Show detailed stats for a package (Python versions, OS breakdown)",
-    )
-    stats_parser.add_argument(
-        "package",
-        help="Package name to show detailed stats for",
-    )
-    stats_parser.set_defaults(func=cmd_stats)
 
     # update command
     update_parser = subparsers.add_parser(

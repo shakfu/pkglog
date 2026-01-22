@@ -1,6 +1,8 @@
 # pkgdb
 
-Track PyPI package download statistics. Fetches download stats via the pypistats API, stores historical data in SQLite, and generates HTML reports with charts.
+Track, store, and analyze PyPI package download statistics.
+
+Fetches download stats via the pypistats API, stores historical data in SQLite, and generates HTML reports with charts.
 
 ## Installation
 

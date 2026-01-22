@@ -1,6 +1,6 @@
 [project]
 name = "pkgdb"
-version = "0.1.0"
+version = "0.1.4"
 description = "Track, store and query your PyPI package download statistics"
 readme = "README.md"
 requires-python = ">=3.10"
