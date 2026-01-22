@@ -33,9 +33,11 @@ qa: lint typecheck format
 
 build: clean
 	@uv build
+	@uv run twine check dist/*
 
 wheel: clean
 	@uv build --wheel
+	@uv run twine check dist/*
 
 sdist: clean
 	@uv build --sdist

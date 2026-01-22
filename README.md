@@ -10,7 +10,7 @@ pip install pkglog
 
 To build:
 
-Requires Python 3.13+. Uses [uv](https://github.com/astral-sh/uv) for dependency management.
+Requires Python 3.10+. Uses [uv](https://github.com/astral-sh/uv) for dependency management.
 
 ```bash
 uv sync
