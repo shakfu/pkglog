@@ -188,12 +188,21 @@ def get_all_history(
 
 
 def get_stats_with_growth(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    """Get latest stats with week-over-week and month-over-month growth metrics."""
+    """Get latest stats with week-over-week and month-over-month growth metrics.
+
+    Uses a single query to fetch all history, avoiding N+1 query pattern.
+    """
     stats = get_latest_stats(conn)
+    if not stats:
+        return stats
+
+    # Fetch all history in ONE query instead of N queries
+    all_history = get_all_history(conn, limit_per_package=31)
 
     for s in stats:
         pkg = s["package_name"]
-        history = get_package_history(conn, pkg, limit=31)
+        # History is sorted ASC by date, reverse for DESC order
+        history = list(reversed(all_history.get(pkg, [])))
 
         # Find stats from ~7 days ago and ~30 days ago
         week_ago = None

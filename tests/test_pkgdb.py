@@ -44,6 +44,7 @@ from pkgdb import (
     PackageInfo,
     FetchResult,
     PackageDetails,
+    validate_package_name,
 )
 
 
@@ -1539,9 +1540,10 @@ class TestPackageStatsService:
         """Service should import packages from file."""
         service = PackageStatsService(temp_db)
 
-        added, skipped = service.import_packages(temp_packages_file)
+        added, skipped, invalid = service.import_packages(temp_packages_file)
         assert added == 2
         assert skipped == 0
+        assert invalid == []
 
         packages = service.list_packages()
         assert len(packages) == 2
@@ -1746,3 +1748,90 @@ class TestPackageStatsService:
             assert result is False
         finally:
             Path(output_path).unlink(missing_ok=True)
+
+
+class TestPackageNameValidation:
+    """Tests for package name validation."""
+
+    def test_valid_package_names(self):
+        """Valid package names should pass validation."""
+        valid_names = [
+            "requests",
+            "my-package",
+            "my_package",
+            "my.package",
+            "package123",
+            "A1",
+            "a",  # Single char is valid
+            "ab",  # Two chars
+            "my-pkg.v2_test",  # Mixed separators
+        ]
+        for name in valid_names:
+            is_valid, error = validate_package_name(name)
+            assert is_valid, f"'{name}' should be valid, got error: {error}"
+
+    def test_empty_package_name(self):
+        """Empty package name should fail validation."""
+        is_valid, error = validate_package_name("")
+        assert not is_valid
+        assert "empty" in error.lower()
+
+    def test_package_name_too_long(self):
+        """Package name exceeding 100 chars should fail validation."""
+        long_name = "a" * 101
+        is_valid, error = validate_package_name(long_name)
+        assert not is_valid
+        assert "100" in error
+
+    def test_package_name_invalid_start(self):
+        """Package names starting with non-alphanumeric should fail."""
+        invalid_names = ["-package", "_package", ".package"]
+        for name in invalid_names:
+            is_valid, error = validate_package_name(name)
+            assert not is_valid, f"'{name}' should be invalid"
+
+    def test_package_name_invalid_end(self):
+        """Package names ending with non-alphanumeric should fail."""
+        invalid_names = ["package-", "package_", "package."]
+        for name in invalid_names:
+            is_valid, error = validate_package_name(name)
+            assert not is_valid, f"'{name}' should be invalid"
+
+    def test_package_name_invalid_chars(self):
+        """Package names with invalid characters should fail."""
+        invalid_names = ["my package", "my@package", "my!pkg", "my/pkg"]
+        for name in invalid_names:
+            is_valid, error = validate_package_name(name)
+            assert not is_valid, f"'{name}' should be invalid"
+
+    def test_service_add_invalid_package_raises(self, temp_db):
+        """Service.add_package should raise ValueError for invalid names."""
+        service = PackageStatsService(temp_db)
+        with pytest.raises(ValueError) as exc_info:
+            service.add_package("")
+        assert "empty" in str(exc_info.value).lower()
+
+        with pytest.raises(ValueError):
+            service.add_package("-invalid")
+
+    def test_service_import_returns_invalid_names(self, temp_db):
+        """Service.import_packages should return list of invalid names."""
+        service = PackageStatsService(temp_db)
+
+        # Create a temp file with mix of valid and invalid names
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("valid-pkg\n")
+            f.write("-invalid\n")
+            f.write("another-valid\n")
+            f.write("also invalid spaces\n")
+            temp_file = f.name
+
+        try:
+            added, skipped, invalid = service.import_packages(temp_file)
+            assert added == 2
+            assert skipped == 0
+            assert len(invalid) == 2
+            assert "-invalid" in invalid
+            assert "also invalid spaces" in invalid
+        finally:
+            Path(temp_file).unlink()

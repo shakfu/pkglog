@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Database context manager `get_db()` for safer resource handling
 - Service layer `PackageStatsService` for decoupled, testable operations
 - Dataclasses: `PackageInfo`, `FetchResult`, `PackageDetails`
-- 35 new tests (104 total)
+- Package name validation: `validate_package_name()` enforces PyPI naming conventions
+- 43 new tests (112 total)
 
 ### Changed
 
@@ -34,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `_make_multi_line_chart()` for multi-package time-series charts
   - `_build_env_charts()` for Python version and OS pie charts
   - Eliminated ~110 lines of duplicated CSS and SVG chart code
+
+### Fixed
+
+- N+1 query performance issue in `get_stats_with_growth()`: now uses single query via `get_all_history()` instead of one query per package
 
 ## [0.1.2]
 

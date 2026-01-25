@@ -56,6 +56,7 @@ from .service import (
 from .utils import (
     calculate_growth,
     make_sparkline,
+    validate_package_name,
 )
 
 __all__ = [
@@ -103,4 +104,5 @@ __all__ = [
     # Utils
     "calculate_growth",
     "make_sparkline",
+    "validate_package_name",
 ]

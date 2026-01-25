@@ -206,10 +206,13 @@ def cmd_list(args: argparse.Namespace) -> None:
 def cmd_add(args: argparse.Namespace) -> None:
     """Add command: add a package to tracking."""
     service = PackageStatsService(args.database)
-    if service.add_package(args.name):
-        print(f"Added '{args.name}' to tracking.")
-    else:
-        print(f"Package '{args.name}' is already being tracked.")
+    try:
+        if service.add_package(args.name):
+            print(f"Added '{args.name}' to tracking.")
+        else:
+            print(f"Package '{args.name}' is already being tracked.")
+    except ValueError as e:
+        print(f"Invalid package name '{args.name}': {e}")
 
 
 def cmd_remove(args: argparse.Namespace) -> None:
@@ -225,8 +228,10 @@ def cmd_import(args: argparse.Namespace) -> None:
     """Import command: import packages from file (YAML, JSON, or text)."""
     service = PackageStatsService(args.database)
     try:
-        added, skipped = service.import_packages(args.file)
+        added, skipped, invalid = service.import_packages(args.file)
         print(f"Imported {added} packages ({skipped} already tracked).")
+        if invalid:
+            print(f"Skipped {len(invalid)} invalid package names: {', '.join(invalid)}")
     except FileNotFoundError:
         print(f"File not found: {args.file}")
 

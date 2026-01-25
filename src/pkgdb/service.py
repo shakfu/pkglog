@@ -20,6 +20,7 @@ from .db import (
     remove_package,
     store_stats,
 )
+from .utils import validate_package_name
 from .export import export_csv, export_json, export_markdown
 from .reports import generate_html_report, generate_package_html_report
 
@@ -78,7 +79,14 @@ class PackageStatsService:
 
         Returns:
             True if package was added, False if it already exists.
+
+        Raises:
+            ValueError: If package name is invalid.
         """
+        is_valid, error_msg = validate_package_name(name)
+        if not is_valid:
+            raise ValueError(error_msg)
+
         with get_db(self.db_path) as conn:
             return add_package(conn, name)
 
@@ -113,14 +121,14 @@ class PackageStatsService:
                 for row in cursor.fetchall()
             ]
 
-    def import_packages(self, file_path: str) -> tuple[int, int]:
+    def import_packages(self, file_path: str) -> tuple[int, int, list[str]]:
         """Import packages from a file.
 
         Args:
             file_path: Path to file (YAML, JSON, or plain text).
 
         Returns:
-            Tuple of (added_count, skipped_count).
+            Tuple of (added_count, skipped_count, invalid_names).
 
         Raises:
             FileNotFoundError: If file doesn't exist.
@@ -130,13 +138,19 @@ class PackageStatsService:
         packages = load_packages_from_file(file_path)
         added = 0
         skipped = 0
+        invalid: list[str] = []
+
         with get_db(self.db_path) as conn:
             for pkg in packages:
+                is_valid, _ = validate_package_name(pkg)
+                if not is_valid:
+                    invalid.append(pkg)
+                    continue
                 if add_package(conn, pkg):
                     added += 1
                 else:
                     skipped += 1
-        return added, skipped
+        return added, skipped, invalid
 
     # -------------------------------------------------------------------------
     # Data Fetching
