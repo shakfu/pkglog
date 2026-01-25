@@ -22,7 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Database functions: `cleanup_orphaned_stats()`, `prune_old_stats()`
 - Service methods: `cleanup()`, `prune()`
 - Named constants for theme colors (`THEME_PRIMARY_COLOR`), chart dimensions, limits (`PIE_CHART_MAX_ITEMS`, `LINE_CHART_MAX_SERIES`), and sparkline parameters (`SPARKLINE_WIDTH`, `SPARKLINE_CHARS`)
-- 43 new tests (112 total)
+- Integration tests (require network, run with `RUN_INTEGRATION=1 pytest -m integration`)
+- Performance tests (run with `RUN_SLOW_TESTS=1 pytest -m slow`)
+- Edge case tests for chart generation (boundary conditions, single data points, large numbers)
+- Error path tests (invalid files, partial API failures, database edge cases)
+- 75 new tests (144 total, 8 skipped by default)
 
 ### Changed
 

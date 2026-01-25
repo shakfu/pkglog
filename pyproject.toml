@@ -55,3 +55,9 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 source-include = ["CHANGELOG.md", "tests"]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests as integration tests (require network, deselect with '-m \"not integration\"')",
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
