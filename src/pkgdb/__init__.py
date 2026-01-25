@@ -39,6 +39,7 @@ from .db import (
     prune_old_stats,
     remove_package,
     store_stats,
+    store_stats_batch,
 )
 from .export import (
     export_csv,
@@ -70,6 +71,7 @@ from .types import (
 from .utils import (
     calculate_growth,
     make_sparkline,
+    validate_output_path,
     validate_package_name,
 )
 
@@ -105,6 +107,7 @@ __all__ = [
     "prune_old_stats",
     "remove_package",
     "store_stats",
+    "store_stats_batch",
     # Export
     "export_csv",
     "export_json",
@@ -130,5 +133,6 @@ __all__ = [
     # Utils
     "calculate_growth",
     "make_sparkline",
+    "validate_output_path",
     "validate_package_name",
 ]

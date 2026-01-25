@@ -109,9 +109,19 @@ def get_packages(conn: sqlite3.Connection) -> list[str]:
 
 
 def store_stats(
-    conn: sqlite3.Connection, package_name: str, stats: PackageStats
+    conn: sqlite3.Connection,
+    package_name: str,
+    stats: PackageStats,
+    commit: bool = True,
 ) -> None:
-    """Store package statistics in the database."""
+    """Store package statistics in the database.
+
+    Args:
+        conn: Database connection.
+        package_name: Name of the package.
+        stats: Package statistics to store.
+        commit: If True, commit the transaction. Set to False for batch operations.
+    """
     fetch_date = datetime.now().strftime("%Y-%m-%d")
     conn.execute(
         """
@@ -128,7 +138,48 @@ def store_stats(
             stats.get("total"),
         ),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
+
+
+def store_stats_batch(
+    conn: sqlite3.Connection, stats_list: list[tuple[str, PackageStats]]
+) -> int:
+    """Store multiple package statistics in a single transaction.
+
+    More efficient than calling store_stats() multiple times as it uses
+    a single commit for all inserts.
+
+    Args:
+        conn: Database connection.
+        stats_list: List of (package_name, stats) tuples to store.
+
+    Returns:
+        Number of packages stored.
+    """
+    fetch_date = datetime.now().strftime("%Y-%m-%d")
+    count = 0
+
+    for package_name, stats in stats_list:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO package_stats
+            (package_name, fetch_date, last_day, last_week, last_month, total)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """,
+            (
+                package_name,
+                fetch_date,
+                stats.get("last_day"),
+                stats.get("last_week"),
+                stats.get("last_month"),
+                stats.get("total"),
+            ),
+        )
+        count += 1
+
+    conn.commit()  # Single commit for all
+    return count
 
 
 def get_latest_stats(conn: sqlite3.Connection) -> list[dict[str, Any]]:

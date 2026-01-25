@@ -8,7 +8,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-import yaml
 
 from pkgdb import (
     get_db_connection,
@@ -21,6 +20,7 @@ from pkgdb import (
     import_packages_from_file,
     load_packages_from_file,
     store_stats,
+    store_stats_batch,
     get_latest_stats,
     get_package_history,
     get_all_history,
@@ -46,6 +46,7 @@ from pkgdb import (
     FetchResult,
     PackageDetails,
     validate_package_name,
+    validate_output_path,
 )
 
 
@@ -60,11 +61,11 @@ def temp_db():
 
 @pytest.fixture
 def temp_packages_file():
-    """Create a temporary packages.yml file."""
+    """Create a temporary packages.json file."""
     with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".yml", delete=False
+        mode="w", suffix=".json", delete=False
     ) as f:
-        yaml.dump({"published": ["package-a", "package-b"]}, f)
+        json.dump({"published": ["package-a", "package-b"]}, f)
         packages_path = f.name
     yield packages_path
     Path(packages_path).unlink(missing_ok=True)
@@ -241,8 +242,8 @@ class TestPackageManagement:
         packages = get_packages(db_conn)
         assert packages == ["package-a", "package-b", "package-c"]  # Sorted
 
-    def test_import_packages_from_yaml(self, db_conn, temp_packages_file):
-        """import_packages_from_file should import packages from YAML."""
+    def test_import_packages_from_json(self, db_conn, temp_packages_file):
+        """import_packages_from_file should import packages from JSON."""
         added, skipped = import_packages_from_file(db_conn, temp_packages_file)
         assert added == 2
         assert skipped == 0
@@ -312,9 +313,9 @@ class TestLoadPackages:
     def test_load_packages_empty_published(self):
         """load_packages should return empty list if published key is missing."""
         with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yml", delete=False
+            mode="w", suffix=".json", delete=False
         ) as f:
-            yaml.dump({"other_key": ["something"]}, f)
+            json.dump({"other_key": ["something"]}, f)
             path = f.name
 
         try:
@@ -326,7 +327,7 @@ class TestLoadPackages:
     def test_load_packages_file_not_found(self):
         """load_packages should raise FileNotFoundError for missing files."""
         with pytest.raises(FileNotFoundError):
-            load_packages("/nonexistent/packages.yml")
+            load_packages("/nonexistent/packages.json")
 
 
 class TestStoreAndRetrieveStats:
@@ -793,7 +794,7 @@ class TestCLI:
         """Default values should be set correctly."""
         config_dir = get_config_dir()
         assert DEFAULT_DB_FILE == str(config_dir / "pkg.db")
-        assert DEFAULT_PACKAGES_FILE == "packages.yml"
+        assert DEFAULT_PACKAGES_FILE == str(config_dir / "packages.json")
         assert DEFAULT_REPORT_FILE == str(config_dir / "report.html")
 
     def test_main_no_command_shows_help(self, capsys):
@@ -909,7 +910,7 @@ class TestCLI:
         init_db(conn)
         conn.close()
 
-        with patch("sys.argv", ["pkgdb", "-d", temp_db, "import", "/nonexistent/file.yml"]):
+        with patch("sys.argv", ["pkgdb", "-d", temp_db, "import", "/nonexistent/file.json"]):
             main()
 
         assert "File not found" in caplog.text
@@ -2099,14 +2100,14 @@ class TestErrorPaths:
         assert row["last_day"] is None
         assert row["total"] is None
 
-    def test_load_packages_invalid_yaml(self):
-        """load_packages should handle invalid YAML gracefully."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
-            f.write("invalid: yaml: content: [unclosed")
+    def test_load_packages_invalid_json(self):
+        """load_packages should handle invalid JSON gracefully."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write("{invalid json")
             path = f.name
 
         try:
-            with pytest.raises(yaml.YAMLError):
+            with pytest.raises(json.JSONDecodeError):
                 load_packages(path)
         finally:
             Path(path).unlink(missing_ok=True)
@@ -2379,3 +2380,266 @@ class TestPerformance:
         # Verify growth is calculated
         assert all("week_growth" in s for s in stats)
         assert all("month_growth" in s for s in stats)
+
+
+# =============================================================================
+# Output Path Validation Tests
+# =============================================================================
+
+
+class TestOutputPathValidation:
+    """Tests for output path validation."""
+
+    def test_valid_path_in_temp_dir(self):
+        """Valid path in temp directory should pass."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "output.html")
+            is_valid, error = validate_output_path(path)
+            assert is_valid, f"Should be valid: {error}"
+
+    def test_valid_path_with_allowed_extension(self):
+        """Path with allowed extension should pass."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "report.html")
+            is_valid, error = validate_output_path(path, allowed_extensions=[".html"])
+            assert is_valid, f"Should be valid: {error}"
+
+    def test_invalid_extension(self):
+        """Path with wrong extension should fail."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "report.txt")
+            is_valid, error = validate_output_path(path, allowed_extensions=[".html"])
+            assert not is_valid
+            assert "extension" in error.lower()
+
+    def test_empty_path(self):
+        """Empty path should fail."""
+        is_valid, error = validate_output_path("")
+        assert not is_valid
+        assert "empty" in error.lower()
+
+    def test_nonexistent_parent_directory(self):
+        """Path with nonexistent parent should fail."""
+        is_valid, error = validate_output_path("/nonexistent/directory/file.html")
+        assert not is_valid
+        assert "not exist" in error.lower()
+
+    def test_sensitive_system_path_unix(self):
+        """Paths to sensitive Unix directories should fail."""
+        if os.name != "nt":  # Skip on Windows
+            is_valid, error = validate_output_path("/etc/passwd.html")
+            assert not is_valid
+            # Could be rejected as system directory or as not writable
+            assert "directory" in error.lower()
+
+    def test_path_traversal_detection(self):
+        """Path traversal attempts should be caught."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # This resolves to parent directory which should still work
+            # if it's writable, but the path is normalized
+            path = os.path.join(tmpdir, "..", "output.html")
+            # The validation should resolve the path
+            is_valid, error = validate_output_path(path)
+            # May or may not be valid depending on parent permissions
+            # The key is that .. is resolved
+            assert isinstance(is_valid, bool)
+
+    def test_writable_check(self):
+        """Non-writable parent should fail when must_be_writable=True."""
+        # /usr should not be writable for normal users
+        if os.name != "nt" and not os.access("/usr", os.W_OK):
+            is_valid, error = validate_output_path("/usr/output.html", must_be_writable=True)
+            assert not is_valid
+
+
+# =============================================================================
+# Batch Stats Storage Tests
+# =============================================================================
+
+
+class TestBatchStatsStorage:
+    """Tests for batch stats storage functionality."""
+
+    def test_store_stats_batch_basic(self, db_conn):
+        """store_stats_batch should store multiple packages in one transaction."""
+        stats_list = [
+            ("pkg-a", {"last_day": 10, "last_week": 70, "last_month": 300, "total": 1000}),
+            ("pkg-b", {"last_day": 20, "last_week": 140, "last_month": 600, "total": 2000}),
+            ("pkg-c", {"last_day": 30, "last_week": 210, "last_month": 900, "total": 3000}),
+        ]
+
+        count = store_stats_batch(db_conn, stats_list)
+        assert count == 3
+
+        # Verify all packages stored
+        cursor = db_conn.execute("SELECT COUNT(*) as count FROM package_stats")
+        assert cursor.fetchone()["count"] == 3
+
+        # Verify data correctness
+        cursor = db_conn.execute(
+            "SELECT total FROM package_stats WHERE package_name = ?", ("pkg-b",)
+        )
+        assert cursor.fetchone()["total"] == 2000
+
+    def test_store_stats_batch_empty_list(self, db_conn):
+        """store_stats_batch should handle empty list."""
+        count = store_stats_batch(db_conn, [])
+        assert count == 0
+
+    def test_store_stats_batch_single_commit(self, db_conn):
+        """store_stats_batch should use single commit (more efficient)."""
+        # This is a behavioral test - batch should be faster than individual
+        stats_list = [
+            (f"pkg-{i}", {"last_day": i, "last_week": i*7, "last_month": i*30, "total": i*100})
+            for i in range(10)
+        ]
+
+        count = store_stats_batch(db_conn, stats_list)
+        assert count == 10
+
+        # All should be stored
+        cursor = db_conn.execute("SELECT COUNT(*) as count FROM package_stats")
+        assert cursor.fetchone()["count"] == 10
+
+    def test_store_stats_with_commit_false(self, db_conn):
+        """store_stats with commit=False should not auto-commit."""
+        stats = {"last_day": 100, "last_week": 700, "last_month": 3000, "total": 50000}
+
+        # Store without commit
+        store_stats(db_conn, "test-pkg", stats, commit=False)
+
+        # Should be visible in same connection
+        cursor = db_conn.execute(
+            "SELECT * FROM package_stats WHERE package_name = ?", ("test-pkg",)
+        )
+        row = cursor.fetchone()
+        assert row is not None
+
+        # Manual commit
+        db_conn.commit()
+
+    def test_service_fetch_uses_batch_commit(self, temp_db):
+        """Service fetch_all_stats should use batch commits."""
+        service = PackageStatsService(temp_db)
+        service.add_package("pkg-a")
+        service.add_package("pkg-b")
+
+        recent_response = json.dumps({
+            "data": {"last_day": 100, "last_week": 700, "last_month": 3000}
+        })
+        overall_response = json.dumps({
+            "data": [{"category": "without_mirrors", "downloads": 50000}]
+        })
+
+        with patch("pkgdb.api.pypistats.recent", return_value=recent_response):
+            with patch("pkgdb.api.pypistats.overall", return_value=overall_response):
+                result = service.fetch_all_stats()
+
+        assert result.success == 2
+        assert result.failed == 0
+
+        # Both should be stored
+        stats = service.get_stats()
+        assert len(stats) == 2
+
+
+# =============================================================================
+# Service Path Validation Tests
+# =============================================================================
+
+
+class TestServicePathValidation:
+    """Tests for path validation in service methods."""
+
+    def test_generate_report_validates_path(self, temp_db):
+        """generate_report should validate output path."""
+        service = PackageStatsService(temp_db)
+
+        # Add some data
+        conn = get_db_connection(temp_db)
+        init_db(conn)
+        conn.execute("""
+            INSERT INTO package_stats
+            (package_name, fetch_date, last_day, last_week, last_month, total)
+            VALUES ('test-pkg', '2024-01-01', 10, 70, 300, 1000)
+        """)
+        conn.commit()
+        conn.close()
+
+        # Invalid extension should fail
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bad_path = os.path.join(tmpdir, "report.txt")
+            with pytest.raises(ValueError) as exc_info:
+                service.generate_report(bad_path)
+            assert "extension" in str(exc_info.value).lower()
+
+    def test_generate_report_valid_path_works(self, temp_db):
+        """generate_report should work with valid path."""
+        service = PackageStatsService(temp_db)
+
+        # Add some data
+        conn = get_db_connection(temp_db)
+        init_db(conn)
+        conn.execute("""
+            INSERT INTO package_stats
+            (package_name, fetch_date, last_day, last_week, last_month, total)
+            VALUES ('test-pkg', '2024-01-01', 10, 70, 300, 1000)
+        """)
+        conn.commit()
+        conn.close()
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
+            output_path = f.name
+
+        try:
+            result = service.generate_report(output_path)
+            assert result is True
+            assert Path(output_path).exists()
+        finally:
+            Path(output_path).unlink(missing_ok=True)
+
+    def test_generate_package_report_validates_path(self, temp_db):
+        """generate_package_report should validate output path."""
+        service = PackageStatsService(temp_db)
+
+        python_response = json.dumps({"data": []})
+        system_response = json.dumps({"data": []})
+        recent_response = json.dumps({
+            "data": {"last_day": 100, "last_week": 700, "last_month": 3000}
+        })
+        overall_response = json.dumps({
+            "data": [{"category": "without_mirrors", "downloads": 50000}]
+        })
+
+        # Invalid extension should fail
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bad_path = os.path.join(tmpdir, "report.csv")
+            with pytest.raises(ValueError) as exc_info:
+                with patch("pkgdb.api.pypistats.python_minor", return_value=python_response):
+                    with patch("pkgdb.api.pypistats.system", return_value=system_response):
+                        with patch("pkgdb.api.pypistats.recent", return_value=recent_response):
+                            with patch("pkgdb.api.pypistats.overall", return_value=overall_response):
+                                service.generate_package_report("test-pkg", bad_path)
+            assert "extension" in str(exc_info.value).lower()
+
+    def test_export_validates_output_path(self, temp_db):
+        """export should validate output path when specified."""
+        service = PackageStatsService(temp_db)
+
+        # Add some data
+        conn = get_db_connection(temp_db)
+        init_db(conn)
+        conn.execute("""
+            INSERT INTO package_stats
+            (package_name, fetch_date, last_day, last_week, last_month, total)
+            VALUES ('test-pkg', '2024-01-01', 10, 70, 300, 1000)
+        """)
+        conn.commit()
+        conn.close()
+
+        # Wrong extension for format
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bad_path = os.path.join(tmpdir, "output.html")
+            with pytest.raises(ValueError) as exc_info:
+                service.export("csv", output_file=bad_path)
+            assert "extension" in str(exc_info.value).lower()

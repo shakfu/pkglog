@@ -7,10 +7,9 @@ from pathlib import Path
 from typing import Any
 import webbrowser
 
-import yaml
 from tabulate import tabulate
 
-from .db import DEFAULT_DB_FILE, DEFAULT_REPORT_FILE
+from .db import DEFAULT_DB_FILE, DEFAULT_REPORT_FILE, get_config_dir
 from .logging import setup_logging
 from .service import PackageStatsService
 from .types import PackageStats
@@ -19,36 +18,32 @@ from .utils import make_sparkline
 logger = logging.getLogger("pkgdb")
 
 
-DEFAULT_PACKAGES_FILE = "packages.yml"
+DEFAULT_PACKAGES_FILE = str(get_config_dir() / "packages.json")
 
 
 def load_packages(packages_file: str) -> list[str]:
-    """Load published packages from YAML file."""
+    """Load published packages from JSON file."""
     with open(packages_file) as f:
-        data = yaml.safe_load(f)
-    result: list[str] = data.get("published", [])
-    return result
+        data = json.load(f)
+    if isinstance(data, list):
+        return [str(p) for p in data]
+    if isinstance(data, dict):
+        return data.get("published", []) or data.get("packages", []) or []
+    return []
 
 
 def load_packages_from_file(file_path: str) -> list[str]:
-    """Load package names from a file (YAML, JSON, or plain text).
+    """Load package names from a file (JSON or plain text).
 
     Supports:
-    - YAML (.yml, .yaml): expects 'published' key with list of packages
-    - JSON (.json): expects list of strings or object with 'packages'/'published' key
-    - Plain text: one package name per line (comments with # supported)
+    - JSON (.json): list of strings or object with 'packages'/'published' key
+    - Plain text (.txt, other): one package name per line (comments with # supported)
     """
     path = Path(file_path)
     suffix = path.suffix.lower()
 
     with open(file_path) as f:
         content = f.read()
-
-    if suffix in (".yml", ".yaml"):
-        data = yaml.safe_load(content)
-        if isinstance(data, dict):
-            return data.get("published", []) or data.get("packages", []) or []
-        return []
 
     if suffix == ".json":
         data = json.loads(content)

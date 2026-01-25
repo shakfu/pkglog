@@ -25,7 +25,7 @@ from .db import (
 from .export import export_csv, export_json, export_markdown
 from .reports import generate_html_report, generate_package_html_report
 from .types import CategoryDownloads, PackageStats
-from .utils import validate_package_name
+from .utils import validate_output_path, validate_package_name
 
 
 @dataclass
@@ -166,6 +166,8 @@ class PackageStatsService:
     ) -> FetchResult:
         """Fetch and store stats for all tracked packages.
 
+        Uses batch commits for better performance when storing multiple packages.
+
         Args:
             progress_callback: Optional callback called for each package with
                 (current_index, total_count, package_name, stats_or_none).
@@ -187,13 +189,17 @@ class PackageStatsService:
                 results[package] = stats
 
                 if stats:
-                    store_stats(conn, package, stats)
+                    # Use commit=False for batch operation
+                    store_stats(conn, package, stats, commit=False)
                     success += 1
                 else:
                     failed += 1
 
                 if progress_callback:
                     progress_callback(i, len(packages), package, stats)
+
+            # Single commit for all successful stores
+            conn.commit()
 
             return FetchResult(success=success, failed=failed, results=results)
 
@@ -275,7 +281,17 @@ class PackageStatsService:
 
         Returns:
             True if report was generated, False if no data available.
+
+        Raises:
+            ValueError: If output path is invalid or not writable.
         """
+        # Validate output path
+        is_valid, error_msg = validate_output_path(
+            output_file, allowed_extensions=[".html", ".htm"]
+        )
+        if not is_valid:
+            raise ValueError(error_msg)
+
         with get_db(self.db_path) as conn:
             stats = get_latest_stats(conn)
             if not stats:
@@ -300,7 +316,17 @@ class PackageStatsService:
 
         Returns:
             True if report was generated.
+
+        Raises:
+            ValueError: If output path is invalid or not writable.
         """
+        # Validate output path
+        is_valid, error_msg = validate_output_path(
+            output_file, allowed_extensions=[".html", ".htm"]
+        )
+        if not is_valid:
+            raise ValueError(error_msg)
+
         with get_db(self.db_path) as conn:
             history = get_package_history(conn, package, limit=30)
 
@@ -325,15 +351,34 @@ class PackageStatsService:
     # Export
     # -------------------------------------------------------------------------
 
-    def export(self, format: str) -> str | None:
+    def export(self, format: str, output_file: str | None = None) -> str | None:
         """Export stats in the specified format.
 
         Args:
             format: One of 'csv', 'json', 'markdown', 'md'.
+            output_file: Optional path to write output. If None, returns string.
 
         Returns:
             Exported string, or None if no data available.
+
+        Raises:
+            ValueError: If format is unknown or output path is invalid.
         """
+        # Validate output path if specified
+        if output_file:
+            ext_map = {
+                "csv": [".csv"],
+                "json": [".json"],
+                "markdown": [".md", ".markdown", ".txt"],
+                "md": [".md", ".markdown", ".txt"],
+            }
+            allowed_ext = ext_map.get(format, [])
+            is_valid, error_msg = validate_output_path(
+                output_file, allowed_extensions=allowed_ext if allowed_ext else None
+            )
+            if not is_valid:
+                raise ValueError(error_msg)
+
         stats = self.get_stats()
         if not stats:
             return None

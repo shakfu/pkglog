@@ -22,17 +22,35 @@ uv sync
 
 ### Configure packages
 
-Edit `packages.yml` to list the packages you want to track:
+Create `~/.pkgdb/packages.json` to list packages to track:
 
-```yaml
-published:
-  - my-package
-  - another-package
+```json
+["my-package", "another-package"]
 ```
+
+Or use an object with a `published` key:
+
+```json
+{"published": ["my-package", "another-package"]}
+```
+
+Alternatively, use `pkgdb add <package>` to add packages individually.
 
 ### Commands
 
 ```bash
+# Add a package to tracking
+pkgdb add <package-name>
+
+# Remove a package from tracking
+pkgdb remove <package-name>
+
+# List tracked packages
+pkgdb list
+
+# Import packages from a file (JSON or plain text)
+pkgdb import packages.json
+
 # Fetch latest stats from PyPI and store in database
 pkgdb fetch
 
@@ -61,6 +79,12 @@ pkgdb stats <package-name>
 
 # Fetch stats and generate report in one step
 pkgdb update
+
+# Clean up orphaned stats (for packages no longer tracked)
+pkgdb cleanup
+
+# Prune stats older than N days
+pkgdb cleanup --days 365
 ```
 
 ### Options
@@ -68,6 +92,12 @@ pkgdb update
 ```bash
 # Use custom database file
 pkgdb -d custom.db fetch
+
+# Verbose output (show debug messages)
+pkgdb -v fetch
+
+# Quiet mode (only show warnings/errors)
+pkgdb -q fetch
 
 # Specify output file for report
 pkgdb report -o custom-report.html
@@ -84,20 +114,32 @@ pkgdb export -f json -o stats.json
 
 ## Architecture
 
-Modular CLI application with seven commands:
+Modular CLI application with the following commands:
 
-- **fetch**: Calls `pypistats.recent()` and `pypistats.overall()` for each package, stores results in SQLite
-- **list**: Queries latest stats per package with trend sparklines and growth metrics
-- **history**: Shows historical data for a specific package over time
-- **report**: Generates self-contained HTML report with SVG charts (bar charts + time-series). With `-e` flag, includes Python version and OS distribution summary. With package argument, generates detailed single-package report
-- **export**: Exports stats in CSV, JSON, or Markdown format
-- **stats**: Shows detailed breakdown (Python versions, OS) for a single package
-- **update**: Runs fetch then report
+**Package management:**
+- **add**: Add a package to tracking
+- **remove**: Remove a package from tracking
+- **list**: Show tracked packages with their added dates
+- **import**: Import packages from file (JSON or text)
+
+**Data operations:**
+- **fetch**: Fetch download stats from PyPI and store in SQLite
+- **show**: Display stats in terminal with trend sparklines and growth %
+- **history**: Show historical data for a specific package
+- **stats**: Show detailed breakdown (Python versions, OS) for a package
+- **export**: Export stats in CSV, JSON, or Markdown format
+
+**Reporting:**
+- **report**: Generate HTML report with SVG charts. With `-e` flag, includes Python/OS summary. With package argument, generates detailed single-package report
+- **update**: Run fetch then report in one step
+
+**Maintenance:**
+- **cleanup**: Remove orphaned stats and optionally prune old data
 
 ### Data flow
 
 ```
-packages.yml -> pypistats API -> SQLite (pkg.db) -> HTML/terminal output
+packages.json -> pypistats API -> SQLite (pkg.db) -> HTML/terminal output
 ```
 
 ### Database schema
@@ -116,16 +158,18 @@ Source modules in `src/pkgdb/`:
 - `__init__.py`: Public API and version
 - `cli.py`: CLI argument parsing and commands
 - `service.py`: High-level service layer
-- `db.py`: Database operations
-- `api.py`: pypistats API wrapper
+- `db.py`: Database operations and context manager
+- `api.py`: pypistats API wrapper with parallel fetching
 - `reports.py`: HTML/SVG report generation
 - `export.py`: CSV/JSON/Markdown export
-- `utils.py`: Helper functions
+- `utils.py`: Helper functions and validation
+- `types.py`: TypedDict definitions for type safety
+- `logging.py`: Logging configuration
 
-Data files:
-- `packages.yml`: Package list configuration
-- `~/.pkgdb/pkg.db`: SQLite database (auto-created)
-- `~/.pkgdb/report.html`: Generated HTML report (default output)
+Data files (all in `~/.pkgdb/`):
+- `packages.json`: Package list configuration (optional, can use `add` command instead)
+- `pkg.db`: SQLite database (auto-created)
+- `report.html`: Generated HTML report (default output)
 
 ## Development
 
@@ -144,7 +188,6 @@ pytest -v
 
 Runtime:
 - `pypistats`: PyPI download statistics API client
-- `pyyaml`: YAML configuration parsing
 - `tabulate`: Terminal table formatting
 
 Development:

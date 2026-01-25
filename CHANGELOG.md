@@ -26,10 +26,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Performance tests (run with `RUN_SLOW_TESTS=1 pytest -m slow`)
 - Edge case tests for chart generation (boundary conditions, single data points, large numbers)
 - Error path tests (invalid files, partial API failures, database edge cases)
-- 75 new tests (144 total, 8 skipped by default)
+- Output path validation: `validate_output_path()` checks for path traversal, sensitive directories, file extensions, and write permissions
+- Batch stats storage: `store_stats_batch()` for efficient multi-package inserts with single commit
+- 92 new tests (161 total, 8 skipped by default)
 
 ### Changed
 
+- **BREAKING**: Default config file changed from `packages.yml` to `~/.pkgdb/packages.json`
+- Removed `pyyaml` dependency - now uses stdlib `json` only
+- All data files now consistently use `~/.pkgdb/` directory (packages.json, pkg.db, report.html)
+- Service `fetch_all_stats()` now uses batch commits for better performance
+- Service report/export methods validate output paths before writing
 - Narrowed exception handling in API functions to specific exceptions (`JSONDecodeError`, `URLError`, `ValueError`, `KeyError`, `TypeError`, `OSError`) instead of bare `except` - improves debugging
 - Replaced print statements with Python logging throughout CLI/API/reports
 - Modular architecture: split monolithic `__init__.py` into focused modules:

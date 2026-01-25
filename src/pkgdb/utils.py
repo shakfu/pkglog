@@ -1,6 +1,8 @@
 """Utility functions for pkgdb."""
 
+import os
 import re
+from pathlib import Path
 
 # -----------------------------------------------------------------------------
 # Package Validation Constants
@@ -22,6 +24,79 @@ SPARKLINE_WIDTH = 7
 
 # Characters used to represent values in sparklines (low to high)
 SPARKLINE_CHARS = " _.,:-=+*#"
+
+
+def validate_output_path(
+    path: str,
+    allowed_extensions: list[str] | None = None,
+    must_be_writable: bool = True,
+) -> tuple[bool, str]:
+    """Validate that an output path is safe and writable.
+
+    Security checks:
+    - Resolves to absolute path to detect traversal attempts
+    - Checks parent directory exists and is writable
+    - Optionally validates file extension
+    - Prevents writing to sensitive system directories
+
+    Args:
+        path: Output file path to validate.
+        allowed_extensions: List of allowed extensions (e.g., ['.html', '.csv']).
+                          If None, any extension is allowed.
+        must_be_writable: If True, verify parent directory is writable.
+
+    Returns:
+        Tuple of (is_valid, error_message). If valid, error_message is empty.
+    """
+    if not path:
+        return False, "Output path cannot be empty"
+
+    try:
+        # Resolve to absolute path (detects ../ traversal)
+        resolved = Path(path).resolve()
+
+        # Check for obviously sensitive paths
+        resolved_str = str(resolved).lower()
+        sensitive_prefixes = [
+            "/etc/",
+            "/usr/",
+            "/bin/",
+            "/sbin/",
+            "/var/",
+            "/sys/",
+            "/proc/",
+            "/boot/",
+            "/root/",
+            "c:\\windows\\",
+            "c:\\program files\\",
+            "c:\\programdata\\",
+        ]
+        for prefix in sensitive_prefixes:
+            if resolved_str.startswith(prefix):
+                return False, f"Cannot write to system directory: {resolved.parent}"
+
+        # Check extension if specified
+        if allowed_extensions:
+            ext = resolved.suffix.lower()
+            if ext not in [e.lower() for e in allowed_extensions]:
+                return False, (
+                    f"Invalid file extension '{ext}'. "
+                    f"Allowed: {', '.join(allowed_extensions)}"
+                )
+
+        # Check parent directory exists
+        parent = resolved.parent
+        if not parent.exists():
+            return False, f"Parent directory does not exist: {parent}"
+
+        # Check parent is writable
+        if must_be_writable and not os.access(parent, os.W_OK):
+            return False, f"Parent directory is not writable: {parent}"
+
+        return True, ""
+
+    except (OSError, ValueError) as e:
+        return False, f"Invalid path: {e}"
 
 
 def validate_package_name(name: str) -> tuple[bool, str]:
