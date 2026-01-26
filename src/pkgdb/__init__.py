@@ -5,7 +5,7 @@ Reads published packages from packages.yml, fetches download statistics
 via pypistats, stores data in SQLite, and generates HTML reports.
 """
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 # Re-export public API from submodules
 from .api import (

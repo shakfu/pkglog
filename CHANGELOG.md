@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4]
+
+### Added
+
+- `list` alias for `packages` subcommand: `pkgdb list` now works as an alias for `pkgdb packages`
+
+### Fixed
+
+- Graceful handling of HTTP 404 errors during fetch: packages not found on PyPI stats no longer crash the entire fetch operation; they are logged as warnings and counted as failed
+
 ## [0.1.3]
 
 ### Added

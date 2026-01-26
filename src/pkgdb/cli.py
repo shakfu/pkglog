@@ -488,6 +488,7 @@ def create_parser() -> argparse.ArgumentParser:
     # packages command
     packages_parser = subparsers.add_parser(
         "packages",
+        aliases=["list"],
         help="Show tracked packages",
     )
     packages_parser.set_defaults(func=cmd_packages)

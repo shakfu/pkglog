@@ -8,6 +8,7 @@ from json import JSONDecodeError
 from urllib.error import URLError
 
 import pypistats  # type: ignore[import-untyped]
+import urllib3
 
 from .types import CategoryDownloads, EnvSummary, PackageStats
 
@@ -24,6 +25,7 @@ _API_ERRORS = (
     KeyError,  # Missing expected keys
     TypeError,  # Unexpected data types
     OSError,  # Network-related OS errors
+    urllib3.exceptions.HTTPError,  # HTTP errors (404, 500, etc.)
 )
 
 
