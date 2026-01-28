@@ -63,6 +63,7 @@ class SyncResult:
     added: list[str]
     already_tracked: list[str]
     not_on_remote: list[str]
+    pruned: list[str]
 
 
 class PackageStatsService:
@@ -165,18 +166,23 @@ class PackageStatsService:
                     skipped += 1
         return added, skipped, invalid
 
-    def sync_packages_from_user(self, username: str) -> SyncResult | None:
+    def sync_packages_from_user(
+        self, username: str, prune: bool = False
+    ) -> SyncResult | None:
         """Sync tracked packages with a PyPI user's current packages.
 
         Fetches the user's packages from PyPI and adds any that aren't
-        already being tracked. Does not remove packages.
+        already being tracked. Optionally removes packages no longer
+        associated with the user.
 
         Args:
             username: PyPI username to fetch packages from.
+            prune: If True, remove locally tracked packages not in user's
+                PyPI account.
 
         Returns:
-            SyncResult with lists of added, already tracked, and packages
-            not on remote (locally tracked but not in user's PyPI account).
+            SyncResult with lists of added, already tracked, packages
+            not on remote, and pruned packages.
             Returns None if unable to fetch from PyPI.
         """
         remote_packages = fetch_user_packages(username)
@@ -199,10 +205,17 @@ class PackageStatsService:
             if self.add_package(pkg):
                 added.append(pkg)
 
+        pruned: list[str] = []
+        if prune:
+            for pkg in sorted(not_on_remote):
+                if self.remove_package(pkg):
+                    pruned.append(pkg)
+
         return SyncResult(
             added=added,
             already_tracked=sorted(already_tracked),
             not_on_remote=sorted(not_on_remote),
+            pruned=pruned,
         )
 
     # -------------------------------------------------------------------------

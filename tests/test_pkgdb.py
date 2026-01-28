@@ -1522,6 +1522,31 @@ class TestCLI:
 
         assert "Could not fetch" in caplog.text
 
+    def test_main_sync_command_with_prune(self, temp_db, caplog):
+        """sync command with --prune should remove packages not on remote."""
+        conn = get_db_connection(temp_db)
+        init_db(conn)
+        add_package(conn, "local-only-pkg")
+        add_package(conn, "common-pkg")
+        conn.close()
+
+        mock_packages = [["Owner", "common-pkg"]]
+
+        with patch("sys.argv", ["pkgdb", "-d", temp_db, "sync", "--user", "testuser", "--prune"]):
+            with patch("pkgdb.api.xmlrpc.client.ServerProxy") as mock_proxy:
+                mock_proxy.return_value.user_packages.return_value = mock_packages
+                main()
+
+        assert "Pruned 1 packages" in caplog.text
+        assert "local-only-pkg" in caplog.text
+
+        # Verify package was removed from database
+        conn = get_db_connection(temp_db)
+        packages = get_packages(conn)
+        conn.close()
+        assert "local-only-pkg" not in packages
+        assert "common-pkg" in packages
+
 
 class TestFetchUserPackages:
     """Tests for fetch_user_packages function."""
@@ -2046,6 +2071,7 @@ class TestPackageStatsService:
         assert result.added == ["new-pkg-1", "new-pkg-2"]
         assert result.already_tracked == ["existing-pkg"]
         assert result.not_on_remote == []
+        assert result.pruned == []
 
         # Verify packages were actually added
         packages = [p.name for p in service.list_packages()]
@@ -2066,6 +2092,7 @@ class TestPackageStatsService:
         assert result.added == ["new-remote-pkg"]
         assert result.already_tracked == ["common-pkg"]
         assert result.not_on_remote == ["local-only-pkg"]
+        assert result.pruned == []
 
     def test_service_sync_packages_empty_remote(self, temp_db):
         """sync_packages_from_user should handle user with no packages."""
@@ -2079,6 +2106,7 @@ class TestPackageStatsService:
         assert result.added == []
         assert result.already_tracked == []
         assert result.not_on_remote == ["local-pkg"]
+        assert result.pruned == []
 
     def test_service_sync_packages_empty_local(self, temp_db):
         """sync_packages_from_user should add all packages when none tracked."""
@@ -2091,6 +2119,7 @@ class TestPackageStatsService:
         assert result.added == ["pkg-a", "pkg-b"]
         assert result.already_tracked == []
         assert result.not_on_remote == []
+        assert result.pruned == []
 
     def test_service_sync_packages_api_error(self, temp_db):
         """sync_packages_from_user should return None on API error."""
@@ -2115,6 +2144,48 @@ class TestPackageStatsService:
         assert result.added == []
         assert sorted(result.already_tracked) == ["pkg-a", "pkg-b"]
         assert result.not_on_remote == []
+        assert result.pruned == []
+
+    def test_service_sync_packages_with_prune(self, temp_db):
+        """sync_packages_from_user with prune=True should remove packages not on remote."""
+        service = PackageStatsService(temp_db)
+        service.add_package("local-only-pkg")
+        service.add_package("common-pkg")
+
+        with patch("pkgdb.service.fetch_user_packages") as mock_fetch:
+            mock_fetch.return_value = ["common-pkg", "new-remote-pkg"]
+            result = service.sync_packages_from_user("testuser", prune=True)
+
+        assert result.added == ["new-remote-pkg"]
+        assert result.already_tracked == ["common-pkg"]
+        assert result.not_on_remote == ["local-only-pkg"]
+        assert result.pruned == ["local-only-pkg"]
+
+        # Verify package was actually removed
+        packages = [p.name for p in service.list_packages()]
+        assert "local-only-pkg" not in packages
+        assert "common-pkg" in packages
+        assert "new-remote-pkg" in packages
+
+    def test_service_sync_packages_prune_multiple(self, temp_db):
+        """sync_packages_from_user with prune=True should remove multiple packages."""
+        service = PackageStatsService(temp_db)
+        service.add_package("local-a")
+        service.add_package("local-b")
+        service.add_package("common-pkg")
+
+        with patch("pkgdb.service.fetch_user_packages") as mock_fetch:
+            mock_fetch.return_value = ["common-pkg"]
+            result = service.sync_packages_from_user("testuser", prune=True)
+
+        assert result.added == []
+        assert result.already_tracked == ["common-pkg"]
+        assert result.not_on_remote == ["local-a", "local-b"]
+        assert result.pruned == ["local-a", "local-b"]
+
+        # Verify packages were removed
+        packages = [p.name for p in service.list_packages()]
+        assert packages == ["common-pkg"]
 
 
 class TestPackageNameValidation:

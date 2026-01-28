@@ -10,8 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `sync` command: `pkgdb sync --user <username>` refreshes the package list from a PyPI user account, adding any new packages published since the last sync without duplicating existing ones
-- `SyncResult` dataclass for programmatic access to sync results (added, already_tracked, not_on_remote)
-- Service method `sync_packages_from_user()` for the service layer API
+- `sync --prune` option: removes locally tracked packages no longer in the user's PyPI account
+- `SyncResult` dataclass for programmatic access to sync results (added, already_tracked, not_on_remote, pruned)
+- Service method `sync_packages_from_user(username, prune=False)` for the service layer API
 
 ## [0.1.4]
 

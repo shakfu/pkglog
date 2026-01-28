@@ -313,10 +313,11 @@ def cmd_init(args: argparse.Namespace) -> None:
 def cmd_sync(args: argparse.Namespace) -> None:
     """Sync command: refresh package list from PyPI user account."""
     username = args.user
+    prune = getattr(args, "prune", False)
     logger.info("Syncing packages for PyPI user '%s'...", username)
 
     service = PackageStatsService(args.database)
-    result = service.sync_packages_from_user(username)
+    result = service.sync_packages_from_user(username, prune=prune)
 
     if result is None:
         logger.error(
@@ -329,6 +330,9 @@ def cmd_sync(args: argparse.Namespace) -> None:
     else:
         logger.info("No new packages to add.")
 
+    if result.pruned:
+        logger.info("Pruned %d packages: %s", len(result.pruned), ", ".join(result.pruned))
+
     if result.already_tracked:
         logger.debug(
             "%d packages already tracked: %s",
@@ -336,7 +340,7 @@ def cmd_sync(args: argparse.Namespace) -> None:
             ", ".join(result.already_tracked),
         )
 
-    if result.not_on_remote:
+    if result.not_on_remote and not prune:
         logger.warning(
             "%d locally tracked packages not found in user's PyPI account: %s",
             len(result.not_on_remote),
@@ -568,6 +572,11 @@ def create_parser() -> argparse.ArgumentParser:
         required=True,
         metavar="USERNAME",
         help="PyPI username to sync packages from",
+    )
+    sync_parser.add_argument(
+        "--prune",
+        action="store_true",
+        help="Remove locally tracked packages not in user's PyPI account",
     )
     sync_parser.set_defaults(func=cmd_sync)
 

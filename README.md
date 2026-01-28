@@ -92,6 +92,9 @@ pkgdb init --user <pypi-username>
 # Refresh package list from PyPI user (add new packages since last sync)
 pkgdb sync --user <pypi-username>
 
+# Sync and remove packages no longer in user's PyPI account
+pkgdb sync --user <pypi-username> --prune
+
 # Show version
 pkgdb version
 ```
