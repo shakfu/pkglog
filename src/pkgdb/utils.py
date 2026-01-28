@@ -184,7 +184,10 @@ def parse_date_arg(value: str) -> tuple[str | None, str | None]:
 
         return target.strftime("%Y-%m-%d"), None
 
-    return None, f"Invalid date format: {value}. Use YYYY-MM-DD or relative format (7d, 2w, 1m)"
+    return (
+        None,
+        f"Invalid date format: {value}. Use YYYY-MM-DD or relative format (7d, 2w, 1m)",
+    )
 
 
 def calculate_growth(current: int | None, previous: int | None) -> float | None:

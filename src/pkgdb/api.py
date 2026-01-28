@@ -59,6 +59,7 @@ def check_package_exists(package_name: str) -> tuple[bool | None, str | None]:
     except OSError as e:
         return None, f"Connection error: {e}"
 
+
 # Exceptions that indicate API/network errors (not programming bugs)
 _API_ERRORS = (
     JSONDecodeError,  # Malformed JSON response

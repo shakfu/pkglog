@@ -149,11 +149,12 @@ def cmd_update(args: argparse.Namespace) -> None:
 
 def _format_size(size_bytes: int) -> str:
     """Format bytes as human-readable size."""
+    size: float = size_bytes
     for unit in ["B", "KB", "MB", "GB"]:
-        if size_bytes < 1024:
-            return f"{size_bytes:.1f} {unit}" if unit != "B" else f"{size_bytes} {unit}"
-        size_bytes /= 1024
-    return f"{size_bytes:.1f} TB"
+        if size < 1024:
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
 
 
 def cmd_show(args: argparse.Namespace) -> None:
@@ -329,12 +330,16 @@ def cmd_sync(args: argparse.Namespace) -> None:
         return
 
     if result.added:
-        logger.info("Added %d new packages: %s", len(result.added), ", ".join(result.added))
+        logger.info(
+            "Added %d new packages: %s", len(result.added), ", ".join(result.added)
+        )
     else:
         logger.info("No new packages to add.")
 
     if result.pruned:
-        logger.info("Pruned %d packages: %s", len(result.pruned), ", ".join(result.pruned))
+        logger.info(
+            "Pruned %d packages: %s", len(result.pruned), ", ".join(result.pruned)
+        )
 
     if result.already_tracked:
         logger.debug(
@@ -490,7 +495,9 @@ def cmd_badge(args: argparse.Namespace) -> None:
     )
 
     if svg is None:
-        logger.error("No stats found for package '%s'. Run 'fetch' first.", args.package)
+        logger.error(
+            "No stats found for package '%s'. Run 'fetch' first.", args.package
+        )
         return
 
     output = getattr(args, "output", None)
