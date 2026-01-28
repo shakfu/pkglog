@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Package validation: `add` and `import` commands now verify packages exist on PyPI before adding
+  - Uses HEAD request to PyPI Simple API for minimal overhead
+  - `--no-verify` flag to skip verification for offline/bulk operations
+  - Network errors warn but allow operation (fail open)
+- Relative date queries: `--since` flag now accepts relative formats
+  - `7d` for 7 days ago
+  - `2w` for 2 weeks ago
+  - `1m` for 1 month ago (treated as 30 days)
+  - Still supports `YYYY-MM-DD` format
+- New functions: `check_package_exists()`, `parse_date_arg()`
+- Service methods `add_package()` and `import_packages()` now accept `verify` parameter
+
+### Changed
+
+- `import_packages()` now returns 4-tuple: `(added, skipped, invalid, not_found)`
+
+### Fixed
+
+- "Recent Downloads (Last Month)" chart now sorted by decreasing downloads (consistent with "Total Downloads by Package" chart)
+
 ## [0.1.5]
 
 ### Added

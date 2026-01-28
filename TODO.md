@@ -18,8 +18,8 @@ Feature ideas for pkgdb, ordered by priority.
 ### CLI Improvements
 - [x] Sorting/filtering - `pkgdb show --sort-by month --limit 10`
 - [x] Date filtering - `pkgdb history requests --since 2024-01-01`
-- [ ] Package validation - verify package exists on PyPI before adding
-- [ ] Relative date queries - `pkgdb history requests --since 7d`
+- [x] Package validation - verify package exists on PyPI before adding
+- [x] Relative date queries - `pkgdb history requests --since 7d`
 
 ### Badges & CI
 - [ ] Badge generation - SVG badges for READMEs showing download counts

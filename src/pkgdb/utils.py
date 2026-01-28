@@ -2,6 +2,7 @@
 
 import os
 import re
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # -----------------------------------------------------------------------------
@@ -14,6 +15,12 @@ from pathlib import Path
 # - Max 100 characters
 _PACKAGE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$")
 _MAX_PACKAGE_NAME_LENGTH = 100
+
+# Relative date pattern: Nd (days), Nw (weeks), Nm (months)
+_RELATIVE_DATE_PATTERN = re.compile(r"^(\d+)([dwm])$", re.IGNORECASE)
+
+# Standard date pattern: YYYY-MM-DD
+_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # -----------------------------------------------------------------------------
 # Sparkline Constants
@@ -121,6 +128,63 @@ def validate_package_name(name: str) -> tuple[bool, str]:
         )
 
     return True, ""
+
+
+def parse_date_arg(value: str) -> tuple[str | None, str | None]:
+    """Parse a date argument supporting both absolute and relative formats.
+
+    Supported formats:
+    - YYYY-MM-DD: Standard date format (e.g., "2024-01-15")
+    - Nd: N days ago (e.g., "7d" for 7 days ago)
+    - Nw: N weeks ago (e.g., "2w" for 2 weeks ago)
+    - Nm: N months ago (e.g., "1m" for 1 month ago, treated as 30 days)
+
+    Args:
+        value: Date string to parse.
+
+    Returns:
+        Tuple of (date_string, error_message):
+        - (YYYY-MM-DD string, None) on success
+        - (None, error_message) on failure
+    """
+    if not value:
+        return None, "Date value cannot be empty"
+
+    value = value.strip()
+
+    # Check for standard YYYY-MM-DD format
+    if _DATE_PATTERN.match(value):
+        # Validate it's a real date
+        try:
+            datetime.strptime(value, "%Y-%m-%d")
+            return value, None
+        except ValueError:
+            return None, f"Invalid date: {value}"
+
+    # Check for relative date format
+    match = _RELATIVE_DATE_PATTERN.match(value)
+    if match:
+        amount = int(match.group(1))
+        unit = match.group(2).lower()
+
+        if amount == 0:
+            return None, "Date offset must be greater than 0"
+
+        today = datetime.now()
+
+        if unit == "d":
+            target = today - timedelta(days=amount)
+        elif unit == "w":
+            target = today - timedelta(weeks=amount)
+        elif unit == "m":
+            # Treat months as 30 days
+            target = today - timedelta(days=amount * 30)
+        else:
+            return None, f"Unknown date unit: {unit}"
+
+        return target.strftime("%Y-%m-%d"), None
+
+    return None, f"Invalid date format: {value}. Use YYYY-MM-DD or relative format (7d, 2w, 1m)"
 
 
 def calculate_growth(current: int | None, previous: int | None) -> float | None:

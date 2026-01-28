@@ -13,7 +13,7 @@ from .db import DEFAULT_DB_FILE, DEFAULT_REPORT_FILE, get_config_dir
 from .logging import setup_logging
 from .service import PackageStatsService
 from .types import PackageStats
-from .utils import make_sparkline
+from .utils import make_sparkline, parse_date_arg
 from . import __version__
 
 logger = logging.getLogger("pkgdb")
@@ -247,13 +247,14 @@ def cmd_packages(args: argparse.Namespace) -> None:
 def cmd_add(args: argparse.Namespace) -> None:
     """Add command: add a package to tracking."""
     service = PackageStatsService(args.database)
+    verify = not getattr(args, "no_verify", False)
     try:
-        if service.add_package(args.name):
+        if service.add_package(args.name, verify=verify):
             logger.info("Added '%s' to tracking.", args.name)
         else:
             logger.warning("Package '%s' is already being tracked.", args.name)
     except ValueError as e:
-        logger.error("Invalid package name '%s': %s", args.name, e)
+        logger.error("Error adding package '%s': %s", args.name, e)
 
 
 def cmd_remove(args: argparse.Namespace) -> None:
@@ -268,12 +269,21 @@ def cmd_remove(args: argparse.Namespace) -> None:
 def cmd_import(args: argparse.Namespace) -> None:
     """Import command: import packages from file (YAML, JSON, or text)."""
     service = PackageStatsService(args.database)
+    verify = not getattr(args, "no_verify", False)
     try:
-        added, skipped, invalid = service.import_packages(args.file)
+        added, skipped, invalid, not_found = service.import_packages(
+            args.file, verify=verify
+        )
         logger.info("Imported %d packages (%d already tracked).", added, skipped)
         if invalid:
             logger.warning(
                 "Skipped %d invalid package names: %s", len(invalid), ", ".join(invalid)
+            )
+        if not_found:
+            logger.warning(
+                "Skipped %d packages not found on PyPI: %s",
+                len(not_found),
+                ", ".join(not_found),
             )
     except FileNotFoundError:
         logger.error("File not found: %s", args.file)
@@ -330,8 +340,12 @@ def cmd_history(args: argparse.Namespace) -> None:
         return
 
     # Filter by --since date if provided
-    since = getattr(args, "since", None)
-    if since:
+    since_arg = getattr(args, "since", None)
+    if since_arg:
+        since, error = parse_date_arg(since_arg)
+        if error:
+            logger.error("Invalid --since value: %s", error)
+            return
         history = [h for h in history if h["fetch_date"] >= since]
         if not history:
             logger.warning(
@@ -482,6 +496,11 @@ def create_parser() -> argparse.ArgumentParser:
         "name",
         help="Package name to add",
     )
+    add_parser.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="Skip verification that package exists on PyPI",
+    )
     add_parser.set_defaults(func=cmd_add)
 
     # remove command
@@ -513,6 +532,11 @@ def create_parser() -> argparse.ArgumentParser:
         nargs="?",
         default=DEFAULT_PACKAGES_FILE,
         help=f"File to import from - supports .yml, .json, or plain text (default: {DEFAULT_PACKAGES_FILE})",
+    )
+    import_parser.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="Skip verification that packages exist on PyPI",
     )
     import_parser.set_defaults(func=cmd_import)
 
@@ -616,7 +640,7 @@ def create_parser() -> argparse.ArgumentParser:
     history_parser.add_argument(
         "--since",
         metavar="DATE",
-        help="Show history since DATE (YYYY-MM-DD)",
+        help="Show history since DATE (YYYY-MM-DD or relative: 7d, 2w, 1m)",
     )
     history_parser.set_defaults(func=cmd_history)
 

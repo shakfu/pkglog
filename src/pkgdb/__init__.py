@@ -10,6 +10,7 @@ __version__ = "0.1.5"
 # Re-export public API from submodules
 from .api import (
     aggregate_env_stats,
+    check_package_exists,
     fetch_all_package_stats,
     fetch_os_stats,
     fetch_package_stats,
@@ -73,6 +74,7 @@ from .types import (
 from .utils import (
     calculate_growth,
     make_sparkline,
+    parse_date_arg,
     validate_output_path,
     validate_package_name,
 )
@@ -82,6 +84,7 @@ __all__ = [
     "__version__",
     # API
     "aggregate_env_stats",
+    "check_package_exists",
     "fetch_all_package_stats",
     "fetch_os_stats",
     "fetch_package_stats",
@@ -137,6 +140,7 @@ __all__ = [
     # Utils
     "calculate_growth",
     "make_sparkline",
+    "parse_date_arg",
     "validate_output_path",
     "validate_package_name",
 ]

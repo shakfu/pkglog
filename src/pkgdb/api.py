@@ -6,6 +6,7 @@ import xmlrpc.client
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from json import JSONDecodeError
 from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 import pypistats  # type: ignore[import-untyped]
 import urllib3
@@ -14,8 +15,49 @@ from .types import CategoryDownloads, EnvSummary, PackageStats
 
 logger = logging.getLogger("pkgdb")
 
+# PyPI Simple API endpoint for package existence check
+PYPI_SIMPLE_URL = "https://pypi.org/simple"
+
 # Default number of parallel workers for API calls
 DEFAULT_MAX_WORKERS = 5
+
+# Timeout for package existence check (seconds)
+PACKAGE_CHECK_TIMEOUT = 10
+
+
+def check_package_exists(package_name: str) -> tuple[bool | None, str | None]:
+    """Check if a package exists on PyPI.
+
+    Uses a HEAD request to the PyPI Simple API for minimal overhead.
+
+    Args:
+        package_name: Name of the package to check.
+
+    Returns:
+        Tuple of (exists, error_message):
+        - (True, None) if package exists
+        - (False, None) if package not found (404)
+        - (None, error_message) on network or other errors
+    """
+    url = f"{PYPI_SIMPLE_URL}/{package_name}/"
+    try:
+        request = Request(url, method="HEAD")
+        with urlopen(request, timeout=PACKAGE_CHECK_TIMEOUT) as response:
+            # 200 OK means package exists
+            if response.status == 200:
+                return True, None
+            # Unexpected status
+            return None, f"Unexpected status code: {response.status}"
+    except URLError as e:
+        # Check if it's a 404
+        if hasattr(e, "code") and e.code == 404:
+            return False, None
+        # Network error - fail open with warning
+        return None, f"Network error: {e.reason}"
+    except TimeoutError:
+        return None, "Request timed out"
+    except OSError as e:
+        return None, f"Connection error: {e}"
 
 # Exceptions that indicate API/network errors (not programming bugs)
 _API_ERRORS = (

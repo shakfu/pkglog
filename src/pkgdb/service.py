@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 from .api import (
     aggregate_env_stats,
+    check_package_exists,
     fetch_os_stats,
     fetch_package_stats,
     fetch_python_versions,
@@ -85,21 +86,36 @@ class PackageStatsService:
     # Package Management
     # -------------------------------------------------------------------------
 
-    def add_package(self, name: str) -> bool:
+    def add_package(self, name: str, verify: bool = True) -> bool:
         """Add a package to tracking.
 
         Args:
             name: Package name to add.
+            verify: If True, verify package exists on PyPI before adding.
+                    Network errors are logged as warnings but don't block addition.
 
         Returns:
             True if package was added, False if it already exists.
 
         Raises:
-            ValueError: If package name is invalid.
+            ValueError: If package name is invalid or package not found on PyPI
+                        (when verify=True).
         """
+        import logging
+
+        logger = logging.getLogger("pkgdb")
+
         is_valid, error_msg = validate_package_name(name)
         if not is_valid:
             raise ValueError(error_msg)
+
+        if verify:
+            exists, error = check_package_exists(name)
+            if exists is False:
+                raise ValueError(f"Package '{name}' not found on PyPI")
+            if exists is None and error:
+                # Network error - warn but allow (fail open)
+                logger.warning("Could not verify package '%s': %s", name, error)
 
         with get_db(self.db_path) as conn:
             return add_package(conn, name)
@@ -135,24 +151,31 @@ class PackageStatsService:
                 for row in cursor.fetchall()
             ]
 
-    def import_packages(self, file_path: str) -> tuple[int, int, list[str]]:
+    def import_packages(
+        self, file_path: str, verify: bool = True
+    ) -> tuple[int, int, list[str], list[str]]:
         """Import packages from a file.
 
         Args:
             file_path: Path to file (YAML, JSON, or plain text).
+            verify: If True, verify each package exists on PyPI before adding.
 
         Returns:
-            Tuple of (added_count, skipped_count, invalid_names).
+            Tuple of (added_count, skipped_count, invalid_names, not_found_names).
 
         Raises:
             FileNotFoundError: If file doesn't exist.
         """
+        import logging
+
         from .cli import load_packages_from_file
 
+        logger = logging.getLogger("pkgdb")
         packages = load_packages_from_file(file_path)
         added = 0
         skipped = 0
         invalid: list[str] = []
+        not_found: list[str] = []
 
         with get_db(self.db_path) as conn:
             for pkg in packages:
@@ -160,11 +183,20 @@ class PackageStatsService:
                 if not is_valid:
                     invalid.append(pkg)
                     continue
+
+                if verify:
+                    exists, error = check_package_exists(pkg)
+                    if exists is False:
+                        not_found.append(pkg)
+                        continue
+                    if exists is None and error:
+                        logger.warning("Could not verify package '%s': %s", pkg, error)
+
                 if add_package(conn, pkg):
                     added += 1
                 else:
                     skipped += 1
-        return added, skipped, invalid
+        return added, skipped, invalid, not_found
 
     def sync_packages_from_user(
         self, username: str, prune: bool = False
@@ -202,7 +234,8 @@ class PackageStatsService:
 
         added: list[str] = []
         for pkg in sorted(to_add):
-            if self.add_package(pkg):
+            # Skip verification since packages come from PyPI's user_packages API
+            if self.add_package(pkg, verify=False):
                 added.append(pkg)
 
         pruned: list[str] = []

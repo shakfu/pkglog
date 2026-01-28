@@ -49,6 +49,8 @@ from pkgdb import (
     validate_package_name,
     validate_output_path,
     fetch_user_packages,
+    check_package_exists,
+    parse_date_arg,
 )
 
 
@@ -895,7 +897,7 @@ class TestCLI:
         init_db(conn)
         conn.close()
 
-        with patch("sys.argv", ["pkgdb", "-d", temp_db, "import", temp_packages_file]):
+        with patch("sys.argv", ["pkgdb", "-d", temp_db, "import", temp_packages_file, "--no-verify"]):
             main()
 
         assert "Imported 2 packages" in caplog.text
@@ -1789,9 +1791,9 @@ class TestPackageStatsService:
         """Service should add and remove packages."""
         service = PackageStatsService(temp_db)
 
-        # Add package
-        assert service.add_package("test-package") is True
-        assert service.add_package("test-package") is False  # Already exists
+        # Add package (skip verify for testing)
+        assert service.add_package("test-package", verify=False) is True
+        assert service.add_package("test-package", verify=False) is False  # Already exists
 
         # List packages
         packages = service.list_packages()
@@ -1809,10 +1811,13 @@ class TestPackageStatsService:
         """Service should import packages from file."""
         service = PackageStatsService(temp_db)
 
-        added, skipped, invalid = service.import_packages(temp_packages_file)
+        added, skipped, invalid, not_found = service.import_packages(
+            temp_packages_file, verify=False
+        )
         assert added == 2
         assert skipped == 0
         assert invalid == []
+        assert not_found == []
 
         packages = service.list_packages()
         assert len(packages) == 2
@@ -1820,7 +1825,7 @@ class TestPackageStatsService:
     def test_service_fetch_all_stats(self, temp_db):
         """Service should fetch and store stats for all packages."""
         service = PackageStatsService(temp_db)
-        service.add_package("test-pkg")
+        service.add_package("test-pkg", verify=False)
 
         recent_response = json.dumps({
             "data": {"last_day": 100, "last_week": 700, "last_month": 3000}
@@ -2021,7 +2026,7 @@ class TestPackageStatsService:
     def test_service_sync_packages_adds_new(self, temp_db):
         """sync_packages_from_user should add packages not already tracked."""
         service = PackageStatsService(temp_db)
-        service.add_package("existing-pkg")
+        service.add_package("existing-pkg", verify=False)
 
         with patch("pkgdb.service.fetch_user_packages") as mock_fetch:
             mock_fetch.return_value = ["existing-pkg", "new-pkg-1", "new-pkg-2"]
@@ -2042,8 +2047,8 @@ class TestPackageStatsService:
     def test_service_sync_packages_detects_not_on_remote(self, temp_db):
         """sync_packages_from_user should detect locally tracked packages not on remote."""
         service = PackageStatsService(temp_db)
-        service.add_package("local-only-pkg")
-        service.add_package("common-pkg")
+        service.add_package("local-only-pkg", verify=False)
+        service.add_package("common-pkg", verify=False)
 
         with patch("pkgdb.service.fetch_user_packages") as mock_fetch:
             mock_fetch.return_value = ["common-pkg", "new-remote-pkg"]
@@ -2057,7 +2062,7 @@ class TestPackageStatsService:
     def test_service_sync_packages_empty_remote(self, temp_db):
         """sync_packages_from_user should handle user with no packages."""
         service = PackageStatsService(temp_db)
-        service.add_package("local-pkg")
+        service.add_package("local-pkg", verify=False)
 
         with patch("pkgdb.service.fetch_user_packages") as mock_fetch:
             mock_fetch.return_value = []
@@ -2094,8 +2099,8 @@ class TestPackageStatsService:
     def test_service_sync_packages_no_changes(self, temp_db):
         """sync_packages_from_user should handle case where all packages already tracked."""
         service = PackageStatsService(temp_db)
-        service.add_package("pkg-a")
-        service.add_package("pkg-b")
+        service.add_package("pkg-a", verify=False)
+        service.add_package("pkg-b", verify=False)
 
         with patch("pkgdb.service.fetch_user_packages") as mock_fetch:
             mock_fetch.return_value = ["pkg-a", "pkg-b"]
@@ -2109,8 +2114,8 @@ class TestPackageStatsService:
     def test_service_sync_packages_with_prune(self, temp_db):
         """sync_packages_from_user with prune=True should remove packages not on remote."""
         service = PackageStatsService(temp_db)
-        service.add_package("local-only-pkg")
-        service.add_package("common-pkg")
+        service.add_package("local-only-pkg", verify=False)
+        service.add_package("common-pkg", verify=False)
 
         with patch("pkgdb.service.fetch_user_packages") as mock_fetch:
             mock_fetch.return_value = ["common-pkg", "new-remote-pkg"]
@@ -2130,9 +2135,9 @@ class TestPackageStatsService:
     def test_service_sync_packages_prune_multiple(self, temp_db):
         """sync_packages_from_user with prune=True should remove multiple packages."""
         service = PackageStatsService(temp_db)
-        service.add_package("local-a")
-        service.add_package("local-b")
-        service.add_package("common-pkg")
+        service.add_package("local-a", verify=False)
+        service.add_package("local-b", verify=False)
+        service.add_package("common-pkg", verify=False)
 
         with patch("pkgdb.service.fetch_user_packages") as mock_fetch:
             mock_fetch.return_value = ["common-pkg"]
@@ -2225,12 +2230,15 @@ class TestPackageNameValidation:
             temp_file = f.name
 
         try:
-            added, skipped, invalid = service.import_packages(temp_file)
+            added, skipped, invalid, not_found = service.import_packages(
+                temp_file, verify=False
+            )
             assert added == 2
             assert skipped == 0
             assert len(invalid) == 2
             assert "-invalid" in invalid
             assert "also invalid spaces" in invalid
+            assert not_found == []
         finally:
             Path(temp_file).unlink()
 
@@ -2636,10 +2644,10 @@ class TestPerformance:
 
         service = PackageStatsService(temp_db)
 
-        # Add 100 packages
+        # Add 100 packages (skip verify for performance testing)
         start = time.time()
         for i in range(100):
-            service.add_package(f"test-package-{i:03d}")
+            service.add_package(f"test-package-{i:03d}", verify=False)
         add_time = time.time() - start
 
         # Should complete in reasonable time (< 5 seconds)
@@ -2927,8 +2935,8 @@ class TestBatchStatsStorage:
     def test_service_fetch_uses_batch_commit(self, temp_db):
         """Service fetch_all_stats should use batch commits."""
         service = PackageStatsService(temp_db)
-        service.add_package("pkg-a")
-        service.add_package("pkg-b")
+        service.add_package("pkg-a", verify=False)
+        service.add_package("pkg-b", verify=False)
 
         recent_response = json.dumps({
             "data": {"last_day": 100, "last_week": 700, "last_month": 3000}
@@ -3049,3 +3057,305 @@ class TestServicePathValidation:
             with pytest.raises(ValueError) as exc_info:
                 service.export("csv", output_file=bad_path)
             assert "extension" in str(exc_info.value).lower()
+
+
+# =============================================================================
+# Package Existence Check Tests
+# =============================================================================
+
+
+class TestCheckPackageExists:
+    """Tests for check_package_exists function."""
+
+    def test_existing_package_returns_true(self):
+        """check_package_exists returns (True, None) for existing package."""
+        from pkgdb import check_package_exists
+
+        # Mock a successful HEAD request
+        with patch("pkgdb.api.urlopen") as mock_urlopen:
+            mock_response = type("MockResponse", (), {"status": 200, "__enter__": lambda s: s, "__exit__": lambda s, *a: None})()
+            mock_urlopen.return_value = mock_response
+
+            exists, error = check_package_exists("requests")
+            assert exists is True
+            assert error is None
+
+    def test_nonexistent_package_returns_false(self):
+        """check_package_exists returns (False, None) for 404."""
+        from pkgdb import check_package_exists
+        from urllib.error import HTTPError
+
+        with patch("pkgdb.api.urlopen") as mock_urlopen:
+            error = HTTPError("url", 404, "Not Found", {}, None)
+            error.code = 404
+            mock_urlopen.side_effect = error
+
+            exists, err = check_package_exists("nonexistent-pkg-xyz123")
+            assert exists is False
+            assert err is None
+
+    def test_network_error_returns_none_with_message(self):
+        """check_package_exists returns (None, message) on network error."""
+        from pkgdb import check_package_exists
+        from urllib.error import URLError
+
+        with patch("pkgdb.api.urlopen") as mock_urlopen:
+            mock_urlopen.side_effect = URLError("Connection refused")
+
+            exists, error = check_package_exists("some-package")
+            assert exists is None
+            assert error is not None
+            assert "Network error" in error
+
+    def test_timeout_returns_none_with_message(self):
+        """check_package_exists returns (None, message) on timeout."""
+        from pkgdb import check_package_exists
+
+        with patch("pkgdb.api.urlopen") as mock_urlopen:
+            mock_urlopen.side_effect = TimeoutError()
+
+            exists, error = check_package_exists("some-package")
+            assert exists is None
+            assert error is not None
+            assert "timed out" in error.lower()
+
+
+# =============================================================================
+# Relative Date Parsing Tests
+# =============================================================================
+
+
+class TestParseDateArg:
+    """Tests for parse_date_arg function."""
+
+    def test_standard_date_format(self):
+        """parse_date_arg accepts YYYY-MM-DD format."""
+        from pkgdb import parse_date_arg
+
+        date, error = parse_date_arg("2024-01-15")
+        assert date == "2024-01-15"
+        assert error is None
+
+    def test_invalid_standard_date(self):
+        """parse_date_arg rejects invalid dates."""
+        from pkgdb import parse_date_arg
+
+        date, error = parse_date_arg("2024-13-45")
+        assert date is None
+        assert error is not None
+        assert "Invalid date" in error
+
+    def test_relative_days(self):
+        """parse_date_arg parses Nd format."""
+        from pkgdb import parse_date_arg
+        from datetime import datetime, timedelta
+
+        date, error = parse_date_arg("7d")
+        assert error is None
+        expected = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        assert date == expected
+
+    def test_relative_weeks(self):
+        """parse_date_arg parses Nw format."""
+        from pkgdb import parse_date_arg
+        from datetime import datetime, timedelta
+
+        date, error = parse_date_arg("2w")
+        assert error is None
+        expected = (datetime.now() - timedelta(weeks=2)).strftime("%Y-%m-%d")
+        assert date == expected
+
+    def test_relative_months(self):
+        """parse_date_arg parses Nm format (30 days per month)."""
+        from pkgdb import parse_date_arg
+        from datetime import datetime, timedelta
+
+        date, error = parse_date_arg("1m")
+        assert error is None
+        expected = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        assert date == expected
+
+    def test_case_insensitive(self):
+        """parse_date_arg is case insensitive for units."""
+        from pkgdb import parse_date_arg
+
+        date_lower, _ = parse_date_arg("7d")
+        date_upper, _ = parse_date_arg("7D")
+        assert date_lower == date_upper
+
+    def test_zero_offset_rejected(self):
+        """parse_date_arg rejects zero offset."""
+        from pkgdb import parse_date_arg
+
+        date, error = parse_date_arg("0d")
+        assert date is None
+        assert error is not None
+        assert "greater than 0" in error
+
+    def test_invalid_format_rejected(self):
+        """parse_date_arg rejects invalid formats."""
+        from pkgdb import parse_date_arg
+
+        date, error = parse_date_arg("invalid")
+        assert date is None
+        assert error is not None
+        assert "Invalid date format" in error
+
+    def test_empty_value_rejected(self):
+        """parse_date_arg rejects empty values."""
+        from pkgdb import parse_date_arg
+
+        date, error = parse_date_arg("")
+        assert date is None
+        assert error is not None
+        assert "empty" in error.lower()
+
+
+# =============================================================================
+# Package Verification in Service Tests
+# =============================================================================
+
+
+class TestServicePackageVerification:
+    """Tests for package verification in service methods."""
+
+    def test_add_package_with_verify_rejects_nonexistent(self, temp_db):
+        """add_package with verify=True rejects packages not on PyPI."""
+        service = PackageStatsService(temp_db)
+
+        with patch("pkgdb.service.check_package_exists") as mock_check:
+            mock_check.return_value = (False, None)
+
+            with pytest.raises(ValueError) as exc_info:
+                service.add_package("nonexistent-pkg-xyz123", verify=True)
+
+            assert "not found on PyPI" in str(exc_info.value)
+
+    def test_add_package_with_verify_accepts_existing(self, temp_db):
+        """add_package with verify=True accepts existing packages."""
+        service = PackageStatsService(temp_db)
+
+        with patch("pkgdb.service.check_package_exists") as mock_check:
+            mock_check.return_value = (True, None)
+
+            result = service.add_package("requests", verify=True)
+            assert result is True
+
+    def test_add_package_without_verify_skips_check(self, temp_db):
+        """add_package with verify=False skips PyPI check."""
+        service = PackageStatsService(temp_db)
+
+        with patch("pkgdb.service.check_package_exists") as mock_check:
+            result = service.add_package("any-package", verify=False)
+            assert result is True
+            mock_check.assert_not_called()
+
+    def test_add_package_network_error_warns_but_allows(self, temp_db, caplog):
+        """add_package warns on network error but allows addition."""
+        import logging
+        service = PackageStatsService(temp_db)
+
+        with patch("pkgdb.service.check_package_exists") as mock_check:
+            mock_check.return_value = (None, "Connection refused")
+
+            with caplog.at_level(logging.WARNING):
+                result = service.add_package("some-package", verify=True)
+
+            assert result is True
+            assert "Could not verify" in caplog.text
+
+    def test_import_packages_with_verify_skips_not_found(self, temp_db):
+        """import_packages with verify=True skips packages not on PyPI."""
+        service = PackageStatsService(temp_db)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("requests\nnonexistent-pkg\nflask\n")
+            file_path = f.name
+
+        try:
+            def mock_check(name):
+                if name == "nonexistent-pkg":
+                    return (False, None)
+                return (True, None)
+
+            with patch("pkgdb.service.check_package_exists", side_effect=mock_check):
+                added, skipped, invalid, not_found = service.import_packages(
+                    file_path, verify=True
+                )
+
+            assert added == 2  # requests and flask
+            assert "nonexistent-pkg" in not_found
+        finally:
+            Path(file_path).unlink(missing_ok=True)
+
+    def test_import_packages_without_verify_adds_all(self, temp_db):
+        """import_packages with verify=False adds all valid packages."""
+        service = PackageStatsService(temp_db)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("pkg1\npkg2\npkg3\n")
+            file_path = f.name
+
+        try:
+            with patch("pkgdb.service.check_package_exists") as mock_check:
+                added, skipped, invalid, not_found = service.import_packages(
+                    file_path, verify=False
+                )
+
+            assert added == 3
+            assert not_found == []
+            mock_check.assert_not_called()
+        finally:
+            Path(file_path).unlink(missing_ok=True)
+
+
+# =============================================================================
+# CLI --no-verify Flag Tests
+# =============================================================================
+
+
+class TestCLINoVerifyFlag:
+    """Tests for --no-verify CLI flag."""
+
+    def test_add_parser_has_no_verify_flag(self):
+        """add command should have --no-verify flag."""
+        from pkgdb.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["add", "test-pkg", "--no-verify"])
+        assert args.no_verify is True
+
+    def test_add_parser_no_verify_defaults_false(self):
+        """add command --no-verify should default to False."""
+        from pkgdb.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["add", "test-pkg"])
+        assert getattr(args, "no_verify", False) is False
+
+    def test_import_parser_has_no_verify_flag(self):
+        """import command should have --no-verify flag."""
+        from pkgdb.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["import", "packages.txt", "--no-verify"])
+        assert args.no_verify is True
+
+    def test_history_since_help_mentions_relative(self):
+        """history --since help should mention relative formats."""
+        from pkgdb.cli import create_parser
+        import io
+        import sys
+
+        parser = create_parser()
+        # Get help text for history command
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        try:
+            parser.parse_args(["history", "--help"])
+        except SystemExit:
+            pass
+        help_text = sys.stdout.getvalue()
+        sys.stdout = old_stdout
+
+        assert "7d" in help_text or "relative" in help_text.lower()
