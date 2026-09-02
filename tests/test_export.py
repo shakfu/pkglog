@@ -18,8 +18,22 @@ class TestExportFormats:
     def sample_stats(self):
         """Sample stats for export tests."""
         return [
-            {"package_name": "pkg-a", "total": 10000, "last_month": 3000, "last_week": 700, "last_day": 100, "fetch_date": "2024-01-15"},
-            {"package_name": "pkg-b", "total": 5000, "last_month": 1500, "last_week": 350, "last_day": 50, "fetch_date": "2024-01-15"},
+            {
+                "package_name": "pkg-a",
+                "total": 10000,
+                "last_month": 3000,
+                "last_week": 700,
+                "last_day": 100,
+                "fetch_date": "2024-01-15",
+            },
+            {
+                "package_name": "pkg-b",
+                "total": 5000,
+                "last_month": 1500,
+                "last_week": 350,
+                "last_day": 50,
+                "fetch_date": "2024-01-15",
+            },
         ]
 
     def test_export_csv_format(self, sample_stats):
@@ -27,7 +41,9 @@ class TestExportFormats:
         output = export_csv(sample_stats)
 
         # Check header
-        assert "rank,package_name,total,last_month,last_week,last_day,fetch_date" in output
+        assert (
+            "rank,package_name,total,last_month,last_week,last_day,fetch_date" in output
+        )
 
         # Check data rows
         assert "1,pkg-a,10000,3000,700,100,2024-01-15" in output

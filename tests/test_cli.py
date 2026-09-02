@@ -34,7 +34,6 @@ from pkgdb.utils import utcnow
 from datetime import datetime, timedelta
 
 
-
 def _make_repo_stats(**overrides):
     """Helper to create a RepoStats with sensible defaults."""
     defaults = dict(
@@ -80,9 +79,7 @@ class TestCLI:
     def test_main_add_command(self, temp_db, caplog):
         """add command should add a package to tracking."""
         with patch("sys.argv", ["pkgdb", "-d", temp_db, "add", "requests"]):
-            with patch(
-                "pkgdb.service.check_package_exists", return_value=(True, None)
-            ):
+            with patch("pkgdb.service.check_package_exists", return_value=(True, None)):
                 main()
 
         assert "Added" in caplog.text
@@ -101,9 +98,7 @@ class TestCLI:
         conn.close()
 
         with patch("sys.argv", ["pkgdb", "-d", temp_db, "add", "requests"]):
-            with patch(
-                "pkgdb.service.check_package_exists", return_value=(True, None)
-            ):
+            with patch("pkgdb.service.check_package_exists", return_value=(True, None)):
                 main()
 
         assert "already" in caplog.text
@@ -172,7 +167,10 @@ class TestCLI:
         init_db(conn)
         conn.close()
 
-        with patch("sys.argv", ["pkgdb", "-d", temp_db, "import", temp_packages_file, "--no-verify"]):
+        with patch(
+            "sys.argv",
+            ["pkgdb", "-d", temp_db, "import", temp_packages_file, "--no-verify"],
+        ):
             main()
 
         assert "Imported 2 packages" in caplog.text
@@ -189,7 +187,9 @@ class TestCLI:
         init_db(conn)
         conn.close()
 
-        with patch("sys.argv", ["pkgdb", "-d", temp_db, "import", "/nonexistent/file.json"]):
+        with patch(
+            "sys.argv", ["pkgdb", "-d", temp_db, "import", "/nonexistent/file.json"]
+        ):
             main()
 
         assert "File not found" in caplog.text
@@ -199,17 +199,21 @@ class TestCLI:
         # First add packages to track
         conn = get_db_connection(temp_db)
         init_db(conn)
-        conn.execute("INSERT INTO packages (package_name, added_date) VALUES ('package-a', '2024-01-01')")
-        conn.execute("INSERT INTO packages (package_name, added_date) VALUES ('package-b', '2024-01-01')")
+        conn.execute(
+            "INSERT INTO packages (package_name, added_date) VALUES ('package-a', '2024-01-01')"
+        )
+        conn.execute(
+            "INSERT INTO packages (package_name, added_date) VALUES ('package-b', '2024-01-01')"
+        )
         conn.commit()
         conn.close()
 
-        recent_response = json.dumps({
-            "data": {"last_day": 100, "last_week": 700, "last_month": 3000}
-        })
-        overall_response = json.dumps({
-            "data": [{"category": "without_mirrors", "downloads": 50000}]
-        })
+        recent_response = json.dumps(
+            {"data": {"last_day": 100, "last_week": 700, "last_month": 3000}}
+        )
+        overall_response = json.dumps(
+            {"data": [{"category": "without_mirrors", "downloads": 50000}]}
+        )
 
         with patch("sys.argv", ["pkgdb", "-d", temp_db, "fetch"]):
             with mock_pypistats(recent=recent_response, overall=overall_response):
@@ -275,13 +279,13 @@ class TestCLI:
         track(conn, "test-pkg")
         conn.close()
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".html", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
             output_path = f.name
 
         try:
-            with patch("sys.argv", ["pkgdb", "-d", temp_db, "report", "-o", output_path]):
+            with patch(
+                "sys.argv", ["pkgdb", "-d", temp_db, "report", "-o", output_path]
+            ):
                 with patch("webbrowser.open_new_tab"):
                     main()
 
@@ -306,7 +310,9 @@ class TestCLI:
         track(conn, "test-pkg")
         conn.close()
 
-        with patch("sys.argv", ["pkgdb", "-d", temp_db, "history", "test-pkg", "--text"]):
+        with patch(
+            "sys.argv", ["pkgdb", "-d", temp_db, "history", "test-pkg", "--text"]
+        ):
             main()
 
         captured = capsys.readouterr()
@@ -402,7 +408,10 @@ class TestCLI:
             output_path = f.name
 
         try:
-            with patch("sys.argv", ["pkgdb", "-d", temp_db, "export", "-f", "csv", "-o", output_path]):
+            with patch(
+                "sys.argv",
+                ["pkgdb", "-d", temp_db, "export", "-f", "csv", "-o", output_path],
+            ):
                 main()
 
             assert Path(output_path).exists()
@@ -413,30 +422,40 @@ class TestCLI:
 
     def test_main_stats_command(self, capsys):
         """stats command should display Python versions and OS breakdown."""
-        recent_response = json.dumps({
-            "data": {"last_day": 100, "last_week": 700, "last_month": 3000}
-        })
-        overall_response = json.dumps({
-            "data": [{"category": "without_mirrors", "downloads": 50000}]
-        })
-        python_response = json.dumps({
-            "data": [
-                {"category": "3.11", "downloads": 2000},
-                {"category": "3.10", "downloads": 1000},
-            ]
-        })
-        system_response = json.dumps({
-            "data": [
-                {"category": "Linux", "downloads": 4000},
-                {"category": "Windows", "downloads": 1000},
-            ]
-        })
+        recent_response = json.dumps(
+            {"data": {"last_day": 100, "last_week": 700, "last_month": 3000}}
+        )
+        overall_response = json.dumps(
+            {"data": [{"category": "without_mirrors", "downloads": 50000}]}
+        )
+        python_response = json.dumps(
+            {
+                "data": [
+                    {"category": "3.11", "downloads": 2000},
+                    {"category": "3.10", "downloads": 1000},
+                ]
+            }
+        )
+        system_response = json.dumps(
+            {
+                "data": [
+                    {"category": "Linux", "downloads": 4000},
+                    {"category": "Windows", "downloads": 1000},
+                ]
+            }
+        )
 
         with patch("sys.argv", ["pkgdb", "stats", "test-package"]):
             with patch("pkgdb.api.pypistats.recent", return_value=recent_response):
-                with patch("pkgdb.api.pypistats.overall", return_value=overall_response):
-                    with patch("pkgdb.api.pypistats.python_minor", return_value=python_response):
-                        with patch("pkgdb.api.pypistats.system", return_value=system_response):
+                with patch(
+                    "pkgdb.api.pypistats.overall", return_value=overall_response
+                ):
+                    with patch(
+                        "pkgdb.api.pypistats.python_minor", return_value=python_response
+                    ):
+                        with patch(
+                            "pkgdb.api.pypistats.system", return_value=system_response
+                        ):
                             main()
 
         captured = capsys.readouterr()
@@ -463,32 +482,43 @@ class TestCLI:
         track(conn, "test-pkg")
         conn.close()
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".html", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
             output_path = f.name
 
         # Mock API calls for environment data
-        python_response = json.dumps({
-            "data": [{"category": "3.11", "downloads": 2000}]
-        })
-        system_response = json.dumps({
-            "data": [{"category": "Linux", "downloads": 4000}]
-        })
-        recent_response = json.dumps({
-            "data": {"last_day": 20, "last_week": 140, "last_month": 600}
-        })
-        overall_response = json.dumps({
-            "data": [{"category": "without_mirrors", "downloads": 2000}]
-        })
+        python_response = json.dumps(
+            {"data": [{"category": "3.11", "downloads": 2000}]}
+        )
+        system_response = json.dumps(
+            {"data": [{"category": "Linux", "downloads": 4000}]}
+        )
+        recent_response = json.dumps(
+            {"data": {"last_day": 20, "last_week": 140, "last_month": 600}}
+        )
+        overall_response = json.dumps(
+            {"data": [{"category": "without_mirrors", "downloads": 2000}]}
+        )
 
         try:
-            with patch("sys.argv", ["pkgdb", "-d", temp_db, "report", "test-pkg", "-o", output_path]):
+            with patch(
+                "sys.argv",
+                ["pkgdb", "-d", temp_db, "report", "test-pkg", "-o", output_path],
+            ):
                 with patch("webbrowser.open_new_tab"):
-                    with patch("pkgdb.api.pypistats.recent", return_value=recent_response):
-                        with patch("pkgdb.api.pypistats.overall", return_value=overall_response):
-                            with patch("pkgdb.api.pypistats.python_minor", return_value=python_response):
-                                with patch("pkgdb.api.pypistats.system", return_value=system_response):
+                    with patch(
+                        "pkgdb.api.pypistats.recent", return_value=recent_response
+                    ):
+                        with patch(
+                            "pkgdb.api.pypistats.overall", return_value=overall_response
+                        ):
+                            with patch(
+                                "pkgdb.api.pypistats.python_minor",
+                                return_value=python_response,
+                            ):
+                                with patch(
+                                    "pkgdb.api.pypistats.system",
+                                    return_value=system_response,
+                                ):
                                     main()
 
             assert Path(output_path).exists()
@@ -514,30 +544,38 @@ class TestCLI:
         track(conn, "test-pkg")
         conn.close()
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".html", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
             output_path = f.name
 
         # Mock API calls for environment data
-        python_response = json.dumps({
-            "data": [
-                {"category": "3.11", "downloads": 2000},
-                {"category": "3.10", "downloads": 1000},
-            ]
-        })
-        system_response = json.dumps({
-            "data": [
-                {"category": "Linux", "downloads": 4000},
-                {"category": "Windows", "downloads": 1000},
-            ]
-        })
+        python_response = json.dumps(
+            {
+                "data": [
+                    {"category": "3.11", "downloads": 2000},
+                    {"category": "3.10", "downloads": 1000},
+                ]
+            }
+        )
+        system_response = json.dumps(
+            {
+                "data": [
+                    {"category": "Linux", "downloads": 4000},
+                    {"category": "Windows", "downloads": 1000},
+                ]
+            }
+        )
 
         try:
-            with patch("sys.argv", ["pkgdb", "-d", temp_db, "report", "-e", "-o", output_path]):
+            with patch(
+                "sys.argv", ["pkgdb", "-d", temp_db, "report", "-e", "-o", output_path]
+            ):
                 with patch("webbrowser.open_new_tab"):
-                    with patch("pkgdb.api.pypistats.python_minor", return_value=python_response):
-                        with patch("pkgdb.api.pypistats.system", return_value=system_response):
+                    with patch(
+                        "pkgdb.api.pypistats.python_minor", return_value=python_response
+                    ):
+                        with patch(
+                            "pkgdb.api.pypistats.system", return_value=system_response
+                        ):
                             main()
 
             assert Path(output_path).exists()
@@ -559,13 +597,14 @@ class TestCLI:
         conn.commit()
         conn.close()
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".html", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
             output_path = f.name
 
         try:
-            with patch("sys.argv", ["pkgdb", "-d", temp_db, "report", "--no-browser", "-o", output_path]):
+            with patch(
+                "sys.argv",
+                ["pkgdb", "-d", temp_db, "report", "--no-browser", "-o", output_path],
+            ):
                 with patch("webbrowser.open_new_tab") as mock_browser:
                     main()
                     # Browser should NOT be called
@@ -598,7 +637,7 @@ class TestCLI:
             conn.execute(f"""
                 INSERT INTO package_stats
                 (package_name, fetch_date, last_day, last_week, last_month, total)
-                VALUES ('pkg-{i}', '2024-01-01', {i*10}, {i*70}, {i*300}, {i*1000 + 1000})
+                VALUES ('pkg-{i}', '2024-01-01', {i * 10}, {i * 70}, {i * 300}, {i * 1000 + 1000})
             """)
         conn.commit()
         track(conn, *[f"pkg-{i}" for i in range(5)])
@@ -683,7 +722,19 @@ class TestCLI:
         track(conn, "test-pkg")
         conn.close()
 
-        with patch("sys.argv", ["pkgdb", "-d", temp_db, "history", "test-pkg", "--text", "--since", "2024-01-05"]):
+        with patch(
+            "sys.argv",
+            [
+                "pkgdb",
+                "-d",
+                temp_db,
+                "history",
+                "test-pkg",
+                "--text",
+                "--since",
+                "2024-01-05",
+            ],
+        ):
             main()
 
         captured = capsys.readouterr()
@@ -704,7 +755,10 @@ class TestCLI:
         conn.commit()
         conn.close()
 
-        with patch("sys.argv", ["pkgdb", "-d", temp_db, "history", "test-pkg", "--since", "2024-06-01"]):
+        with patch(
+            "sys.argv",
+            ["pkgdb", "-d", temp_db, "history", "test-pkg", "--since", "2024-06-01"],
+        ):
             main()
 
         assert "No data found" in caplog.text
@@ -774,9 +828,13 @@ class TestCLI:
         """sync command should handle API error."""
         import xmlrpc.client
 
-        with patch("sys.argv", ["pkgdb", "-d", temp_db, "sync", "--user", "nonexistent"]):
+        with patch(
+            "sys.argv", ["pkgdb", "-d", temp_db, "sync", "--user", "nonexistent"]
+        ):
             with patch("pkgdb.api.xmlrpc.client.ServerProxy") as mock_proxy:
-                mock_proxy.return_value.user_packages.side_effect = xmlrpc.client.Fault(1, "User not found")
+                mock_proxy.return_value.user_packages.side_effect = xmlrpc.client.Fault(
+                    1, "User not found"
+                )
                 main()
 
         assert "Could not fetch" in caplog.text
@@ -791,7 +849,10 @@ class TestCLI:
 
         mock_packages = [["Owner", "common-pkg"]]
 
-        with patch("sys.argv", ["pkgdb", "-d", temp_db, "sync", "--user", "testuser", "--prune"]):
+        with patch(
+            "sys.argv",
+            ["pkgdb", "-d", temp_db, "sync", "--user", "testuser", "--prune"],
+        ):
             with patch("pkgdb.api.xmlrpc.client.ServerProxy") as mock_proxy:
                 mock_proxy.return_value.user_packages.return_value = mock_packages
                 main()
@@ -863,9 +924,7 @@ class TestLoadPackages:
 
     def test_load_packages_empty_published(self):
         """load_packages should return empty list if published key is missing."""
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump({"other_key": ["something"]}, f)
             path = f.name
 
@@ -1023,8 +1082,10 @@ class TestInitCommand:
 
     def _no_config(self):
         """Patch helper to skip config file loading."""
-        return patch("pkgdb.config.get_config_path",
-                     return_value=Path("/nonexistent/config.toml"))
+        return patch(
+            "pkgdb.config.get_config_path",
+            return_value=Path("/nonexistent/config.toml"),
+        )
 
     def test_init_with_existing_packages_decline(self, temp_db, caplog):
         """init should ask to continue when packages exist, and exit on 'n'."""
@@ -1049,12 +1110,21 @@ class TestInitCommand:
             "total": 50000,
         }
 
-        with patch("sys.argv", ["pkgdb", "-d", temp_db, "init", "-u", "testuser", "--no-browser"]):
+        with patch(
+            "sys.argv",
+            ["pkgdb", "-d", temp_db, "init", "-u", "testuser", "--no-browser"],
+        ):
             with patch("pkgdb.service.fetch_user_packages", return_value=["test-pkg"]):
-                with patch("pkgdb.service.fetch_package_stats", return_value=mock_stats):
-                    with patch("pkgdb.service.fetch_python_versions", return_value=None):
+                with patch(
+                    "pkgdb.service.fetch_package_stats", return_value=mock_stats
+                ):
+                    with patch(
+                        "pkgdb.service.fetch_python_versions", return_value=None
+                    ):
                         with patch("pkgdb.service.fetch_os_stats", return_value=None):
-                            with patch("pkgdb.service.fetch_daily_downloads", return_value=None):
+                            with patch(
+                                "pkgdb.service.fetch_daily_downloads", return_value=None
+                            ):
                                 with self._no_config():
                                     main()
 
@@ -1076,11 +1146,22 @@ class TestInitCommand:
 
         with patch("sys.argv", ["pkgdb", "-d", temp_db, "init", "--no-browser"]):
             with patch("pkgdb.cli.input", side_effect=inputs):
-                with patch("pkgdb.service.check_package_exists", return_value=(True, None)):
-                    with patch("pkgdb.service.fetch_package_stats", return_value=mock_stats):
-                        with patch("pkgdb.service.fetch_python_versions", return_value=None):
-                            with patch("pkgdb.service.fetch_os_stats", return_value=None):
-                                with patch("pkgdb.service.fetch_daily_downloads", return_value=None):
+                with patch(
+                    "pkgdb.service.check_package_exists", return_value=(True, None)
+                ):
+                    with patch(
+                        "pkgdb.service.fetch_package_stats", return_value=mock_stats
+                    ):
+                        with patch(
+                            "pkgdb.service.fetch_python_versions", return_value=None
+                        ):
+                            with patch(
+                                "pkgdb.service.fetch_os_stats", return_value=None
+                            ):
+                                with patch(
+                                    "pkgdb.service.fetch_daily_downloads",
+                                    return_value=None,
+                                ):
                                     with self._no_config():
                                         main()
 
@@ -1124,23 +1205,32 @@ class TestConfigIntegration:
     def test_main_loads_config(self, tmp_path, temp_db, capsys):
         """main() should load and apply config file."""
         config_path = tmp_path / "config.toml"
-        config_path.write_text(
-            '[defaults]\n'
-            'sort_by = "name"\n'
-        )
+        config_path.write_text('[defaults]\nsort_by = "name"\n')
 
         conn = get_db_connection(temp_db)
         init_db(conn)
         add_package(conn, "alpha-pkg")
         add_package(conn, "zeta-pkg")
-        store_stats(conn, "alpha-pkg", {
-            "last_day": 10, "last_week": 70,
-            "last_month": 300, "total": 5000,
-        })
-        store_stats(conn, "zeta-pkg", {
-            "last_day": 100, "last_week": 700,
-            "last_month": 3000, "total": 50000,
-        })
+        store_stats(
+            conn,
+            "alpha-pkg",
+            {
+                "last_day": 10,
+                "last_week": 70,
+                "last_month": 300,
+                "total": 5000,
+            },
+        )
+        store_stats(
+            conn,
+            "zeta-pkg",
+            {
+                "last_day": 100,
+                "last_week": 700,
+                "last_month": 3000,
+                "total": 50000,
+            },
+        )
         conn.close()
 
         with patch("sys.argv", ["pkgdb", "-d", temp_db, "show"]):
@@ -1156,23 +1246,32 @@ class TestConfigIntegration:
     def test_cli_flag_overrides_config(self, tmp_path, temp_db, capsys):
         """CLI --sort-by should override config sort_by."""
         config_path = tmp_path / "config.toml"
-        config_path.write_text(
-            '[defaults]\n'
-            'sort_by = "name"\n'
-        )
+        config_path.write_text('[defaults]\nsort_by = "name"\n')
 
         conn = get_db_connection(temp_db)
         init_db(conn)
         add_package(conn, "alpha-pkg")
         add_package(conn, "zeta-pkg")
-        store_stats(conn, "alpha-pkg", {
-            "last_day": 10, "last_week": 70,
-            "last_month": 300, "total": 50000,
-        })
-        store_stats(conn, "zeta-pkg", {
-            "last_day": 100, "last_week": 700,
-            "last_month": 3000, "total": 5000,
-        })
+        store_stats(
+            conn,
+            "alpha-pkg",
+            {
+                "last_day": 10,
+                "last_week": 70,
+                "last_month": 300,
+                "total": 50000,
+            },
+        )
+        store_stats(
+            conn,
+            "zeta-pkg",
+            {
+                "last_day": 100,
+                "last_week": 700,
+                "last_month": 3000,
+                "total": 5000,
+            },
+        )
         conn.close()
 
         # --sort-by total should override config's sort_by=name
@@ -1191,18 +1290,26 @@ class TestAdaptiveShowOutput:
     """Tests for R3: show command adapts when history is insufficient."""
 
     def _no_config(self):
-        return patch("pkgdb.config.get_config_path",
-                     return_value=Path("/nonexistent/config.toml"))
+        return patch(
+            "pkgdb.config.get_config_path",
+            return_value=Path("/nonexistent/config.toml"),
+        )
 
     def test_show_hides_trend_growth_with_single_data_point(self, temp_db, capsys):
         """With only one fetch, Trend and Growth columns should not appear."""
         conn = get_db_connection(temp_db)
         init_db(conn)
         add_package(conn, "my-pkg")
-        store_stats(conn, "my-pkg", {
-            "last_day": 100, "last_week": 700,
-            "last_month": 3000, "total": 50000,
-        })
+        store_stats(
+            conn,
+            "my-pkg",
+            {
+                "last_day": 100,
+                "last_week": 700,
+                "last_month": 3000,
+                "total": 50000,
+            },
+        )
         conn.close()
 
         with patch("sys.argv", ["pkgdb", "-d", temp_db, "show"]):
@@ -1216,7 +1323,9 @@ class TestAdaptiveShowOutput:
         assert "Trend" not in captured.out
         assert "Growth" not in captured.out
 
-    def test_show_includes_trend_growth_with_multiple_data_points(self, temp_db, capsys):
+    def test_show_includes_trend_growth_with_multiple_data_points(
+        self, temp_db, capsys
+    ):
         """With multiple fetches, Trend and Growth columns should appear."""
         conn = get_db_connection(temp_db)
         init_db(conn)
@@ -1250,10 +1359,16 @@ class TestAdaptiveShowOutput:
         conn = get_db_connection(temp_db)
         init_db(conn)
         add_package(conn, "my-pkg")
-        store_stats(conn, "my-pkg", {
-            "last_day": 100, "last_week": 700,
-            "last_month": 3000, "total": 50000,
-        })
+        store_stats(
+            conn,
+            "my-pkg",
+            {
+                "last_day": 100,
+                "last_week": 700,
+                "last_month": 3000,
+                "total": 50000,
+            },
+        )
         # Record a recent fetch attempt so next_update_seconds is set
         record_fetch_attempt(conn, "my-pkg", success=True)
         conn.close()
@@ -1270,8 +1385,10 @@ class TestJSONOutput:
     """Tests for R4: --json flag on packages, history, stats, cleanup, github."""
 
     def _no_config(self):
-        return patch("pkgdb.config.get_config_path",
-                     return_value=Path("/nonexistent/config.toml"))
+        return patch(
+            "pkgdb.config.get_config_path",
+            return_value=Path("/nonexistent/config.toml"),
+        )
 
     def test_packages_json(self, temp_db, capsys):
         """packages --json should output valid JSON."""
@@ -1346,13 +1463,17 @@ class TestJSONOutput:
         conn.close()
 
         output = os.path.join(os.path.dirname(temp_db), "history_report.html")
-        with patch("sys.argv", ["pkgdb", "-d", temp_db, "history", "my-pkg",
-                                "-o", output, "--no-browser"]):
+        with patch(
+            "sys.argv",
+            ["pkgdb", "-d", temp_db, "history", "my-pkg", "-o", output, "--no-browser"],
+        ):
             with patch("pkgdb.service.fetch_pypi_releases", return_value=[]):
                 with patch("pkgdb.service.extract_github_url", return_value=None):
                     # No env stats are cached for this package, so the report
                     # would otherwise fetch them from pypistats.
-                    with patch("pkgdb.reports.fetch_python_versions", return_value=None):
+                    with patch(
+                        "pkgdb.reports.fetch_python_versions", return_value=None
+                    ):
                         with patch("pkgdb.reports.fetch_os_stats", return_value=None):
                             with self._no_config():
                                 main()
@@ -1368,8 +1489,10 @@ class TestJSONOutput:
     def test_stats_json(self, temp_db, capsys):
         """stats --json should output valid JSON."""
         mock_stats = {
-            "last_day": 100, "last_week": 700,
-            "last_month": 3000, "total": 50000,
+            "last_day": 100,
+            "last_week": 700,
+            "last_month": 3000,
+            "total": 50000,
         }
         mock_py_versions = [
             {"category": "3.12", "downloads": 20000},
@@ -1382,7 +1505,9 @@ class TestJSONOutput:
 
         with patch("sys.argv", ["pkgdb", "-d", temp_db, "stats", "my-pkg", "--json"]):
             with patch("pkgdb.service.fetch_package_stats", return_value=mock_stats):
-                with patch("pkgdb.service.fetch_python_versions", return_value=mock_py_versions):
+                with patch(
+                    "pkgdb.service.fetch_python_versions", return_value=mock_py_versions
+                ):
                     with patch("pkgdb.service.fetch_os_stats", return_value=mock_os):
                         with self._no_config():
                             main()
@@ -1434,7 +1559,9 @@ class TestJSONOutput:
         conn.commit()
         conn.close()
 
-        with patch("sys.argv", ["pkgdb", "-d", temp_db, "cleanup", "--days", "30", "--json"]):
+        with patch(
+            "sys.argv", ["pkgdb", "-d", temp_db, "cleanup", "--days", "30", "--json"]
+        ):
             with self._no_config():
                 main()
 
@@ -1454,20 +1581,34 @@ class TestJSONOutput:
         conn.close()
 
         mock_stats = RepoStats(
-            owner="owner", name="my-pkg", full_name="owner/my-pkg",
-            description="A test package", stars=42, forks=5,
-            open_issues=3, watchers=42, language="Python",
-            license="MIT", created_at=None, updated_at=None,
-            pushed_at=None, archived=False, fork=False,
-            default_branch="main", topics=[],
+            owner="owner",
+            name="my-pkg",
+            full_name="owner/my-pkg",
+            description="A test package",
+            stars=42,
+            forks=5,
+            open_issues=3,
+            watchers=42,
+            language="Python",
+            license="MIT",
+            created_at=None,
+            updated_at=None,
+            pushed_at=None,
+            archived=False,
+            fork=False,
+            default_branch="main",
+            topics=[],
         )
         mock_result = RepoResult(
-            package_name="my-pkg", repo_url="https://github.com/owner/my-pkg",
+            package_name="my-pkg",
+            repo_url="https://github.com/owner/my-pkg",
             stats=mock_stats,
         )
 
         with patch("sys.argv", ["pkgdb", "-d", temp_db, "github", "--json"]):
-            with patch.object(PackageStatsService, "fetch_github_stats", return_value=[mock_result]):
+            with patch.object(
+                PackageStatsService, "fetch_github_stats", return_value=[mock_result]
+            ):
                 with self._no_config():
                     main()
 
@@ -1489,20 +1630,35 @@ class TestJSONOutput:
         conn.close()
 
         mock_stats = RepoStats(
-            owner="owner", name="my-pkg", full_name="owner/my-pkg",
-            description="A test package", stars=42, forks=5,
-            open_issues=11, watchers=42, language="Python",
-            license="MIT", created_at=None, updated_at=None,
-            pushed_at=None, archived=False, fork=False,
-            default_branch="main", topics=[], open_issues_excl_prs=4,
+            owner="owner",
+            name="my-pkg",
+            full_name="owner/my-pkg",
+            description="A test package",
+            stars=42,
+            forks=5,
+            open_issues=11,
+            watchers=42,
+            language="Python",
+            license="MIT",
+            created_at=None,
+            updated_at=None,
+            pushed_at=None,
+            archived=False,
+            fork=False,
+            default_branch="main",
+            topics=[],
+            open_issues_excl_prs=4,
         )
         mock_result = RepoResult(
-            package_name="my-pkg", repo_url="https://github.com/owner/my-pkg",
+            package_name="my-pkg",
+            repo_url="https://github.com/owner/my-pkg",
             stats=mock_stats,
         )
 
         with patch("sys.argv", ["pkgdb", "-d", temp_db, "github", "--json"]):
-            with patch.object(PackageStatsService, "fetch_github_stats", return_value=[mock_result]):
+            with patch.object(
+                PackageStatsService, "fetch_github_stats", return_value=[mock_result]
+            ):
                 with self._no_config():
                     main()
 
@@ -1523,12 +1679,24 @@ class TestJSONOutput:
 
         def _stats(name, excl_prs):
             return RepoStats(
-                owner="owner", name=name, full_name=f"owner/{name}",
-                description=None, stars=42, forks=5,
-                open_issues=11, watchers=42, language="Python",
-                license="MIT", created_at=None, updated_at=None,
-                pushed_at=None, archived=False, fork=False,
-                default_branch="main", topics=[], open_issues_excl_prs=excl_prs,
+                owner="owner",
+                name=name,
+                full_name=f"owner/{name}",
+                description=None,
+                stars=42,
+                forks=5,
+                open_issues=11,
+                watchers=42,
+                language="Python",
+                license="MIT",
+                created_at=None,
+                updated_at=None,
+                pushed_at=None,
+                archived=False,
+                fork=False,
+                default_branch="main",
+                topics=[],
+                open_issues_excl_prs=excl_prs,
             )
 
         results = [
@@ -1545,16 +1713,16 @@ class TestJSONOutput:
         ]
 
         with patch("sys.argv", ["pkgdb", "-d", temp_db, "github"]):
-            with patch.object(PackageStatsService, "fetch_github_stats", return_value=results):
+            with patch.object(
+                PackageStatsService, "fetch_github_stats", return_value=results
+            ):
                 with self._no_config():
                     main()
 
         captured = capsys.readouterr()
         assert "Issues" in captured.out
         my_row = next(ln for ln in captured.out.splitlines() if "my-pkg" in ln)
-        other_row = next(
-            ln for ln in captured.out.splitlines() if "other-pkg" in ln
-        )
+        other_row = next(ln for ln in captured.out.splitlines() if "other-pkg" in ln)
         assert "4" in my_row.split()
         assert "-" in other_row.split()
         assert "11" not in captured.out
@@ -1597,8 +1765,10 @@ class TestDiffCommand:
     """Tests for the diff command."""
 
     def _no_config(self):
-        return patch("pkgdb.config.get_config_path",
-                     return_value=Path("/nonexistent/config.toml"))
+        return patch(
+            "pkgdb.config.get_config_path",
+            return_value=Path("/nonexistent/config.toml"),
+        )
 
     def _setup_history(self, temp_db):
         """Insert two data points for two packages."""
@@ -1727,10 +1897,16 @@ class TestDiffCommand:
         conn = get_db_connection(temp_db)
         init_db(conn)
         add_package(conn, "my-pkg")
-        store_stats(conn, "my-pkg", {
-            "last_day": 100, "last_week": 700,
-            "last_month": 3000, "total": 50000,
-        })
+        store_stats(
+            conn,
+            "my-pkg",
+            {
+                "last_day": 100,
+                "last_week": 700,
+                "last_month": 3000,
+                "total": 50000,
+            },
+        )
         conn.close()
 
         with patch("sys.argv", ["pkgdb", "-d", temp_db, "diff"]):
@@ -1858,13 +2034,22 @@ class TestDiffCommand:
     @staticmethod
     def _seed_daily(temp_db, package, rows):
         from pkgdb import store_daily_downloads
+
         conn = get_db_connection(temp_db)
         init_db(conn)
         add_package(conn, package)
         store_daily_downloads(
-            conn, package,
-            [{"date": d, "dimension": "overall",
-              "category": "without_mirrors", "downloads": n} for d, n in rows],
+            conn,
+            package,
+            [
+                {
+                    "date": d,
+                    "dimension": "overall",
+                    "category": "without_mirrors",
+                    "downloads": n,
+                }
+                for d, n in rows
+            ],
         )
         conn.close()
 
@@ -1882,7 +2067,7 @@ class TestDiffCommand:
         assert "Week-over-Week (daily downloads)" in out
         assert "This Week" in out and "Last Week" in out
         assert "210" in out  # current week total
-        assert "70" in out   # previous week total
+        assert "70" in out  # previous week total
 
     def test_diff_week_daily_json(self, temp_db, capsys):
         """diff --period week --json should emit exact daily period sums."""
@@ -1890,21 +2075,28 @@ class TestDiffCommand:
         rows += [(f"2026-06-{i:02d}", 30) for i in range(8, 15)]
         self._seed_daily(temp_db, "my-pkg", rows)
 
-        with patch("sys.argv", ["pkgdb", "-d", temp_db, "diff",
-                                 "--period", "week", "--json"]):
+        with patch(
+            "sys.argv", ["pkgdb", "-d", temp_db, "diff", "--period", "week", "--json"]
+        ):
             with self._no_config():
                 main()
         data = json.loads(capsys.readouterr().out)
         assert data == [
-            {"package": "my-pkg", "period": "week",
-             "current": 210, "previous": 70, "change": 140},
+            {
+                "package": "my-pkg",
+                "period": "week",
+                "current": 210,
+                "previous": 70,
+                "change": 140,
+            },
         ]
 
     def test_diff_latest_still_uses_snapshots(self, temp_db, capsys):
         """diff (latest) must remain snapshot-based even with daily data present."""
         self._setup_history(temp_db)  # snapshot rows for alpha/beta
-        self._seed_daily(temp_db, "alpha-pkg",
-                         [(f"2026-06-{i:02d}", 5) for i in range(1, 15)])
+        self._seed_daily(
+            temp_db, "alpha-pkg", [(f"2026-06-{i:02d}", 5) for i in range(1, 15)]
+        )
 
         with patch("sys.argv", ["pkgdb", "-d", temp_db, "diff"]):
             with self._no_config():
@@ -1919,17 +2111,24 @@ class TestCheckCommand:
     """Tests for the `check` command (anomaly + milestone detection)."""
 
     def _no_config(self):
-        return patch("pkgdb.config.get_config_path",
-                     return_value=Path("/nonexistent/config.toml"))
+        return patch(
+            "pkgdb.config.get_config_path",
+            return_value=Path("/nonexistent/config.toml"),
+        )
 
     @staticmethod
     def _seed_daily(temp_db, package, daily_values, start="2026-01-05"):
         from datetime import datetime, timedelta
         from pkgdb import store_daily_downloads
+
         d0 = datetime.strptime(start, "%Y-%m-%d").date()
         rows = [
-            {"date": (d0 + timedelta(days=i)).isoformat(), "dimension": "overall",
-             "category": "without_mirrors", "downloads": v}
+            {
+                "date": (d0 + timedelta(days=i)).isoformat(),
+                "dimension": "overall",
+                "category": "without_mirrors",
+                "downloads": v,
+            }
             for i, v in enumerate(daily_values)
         ]
         conn = get_db_connection(temp_db)
@@ -1940,6 +2139,7 @@ class TestCheckCommand:
 
     def test_check_parser_exists(self):
         from pkgdb.cli import create_parser
+
         args = create_parser().parse_args(["check"])
         assert args.command == "check"
 
@@ -1993,26 +2193,34 @@ class TestCheckCommand:
         conn.commit()
         conn.close()
 
-        with patch("sys.argv",
-                   ["pkgdb", "-d", temp_db, "check", "--milestone", "1000", "--json"]):
+        with patch(
+            "sys.argv",
+            ["pkgdb", "-d", temp_db, "check", "--milestone", "1000", "--json"],
+        ):
             with self._no_config():
                 with pytest.raises(SystemExit) as exc:
                     main()
         assert exc.value.code == 1
         data = json.loads(capsys.readouterr().out)
-        assert data == [{
-            "package": "my-pkg", "kind": "milestone",
-            "milestone": 1000, "total": 1100,
-            "message": "crossed 1,000 observed downloads (now 1,100)",
-        }]
+        assert data == [
+            {
+                "package": "my-pkg",
+                "kind": "milestone",
+                "milestone": 1000,
+                "total": 1100,
+                "message": "crossed 1,000 observed downloads (now 1,100)",
+            }
+        ]
 
 
 class TestTagCommands:
     """Tests for tag / untag / tags commands and show --tag."""
 
     def _no_config(self):
-        return patch("pkgdb.config.get_config_path",
-                     return_value=Path("/nonexistent/config.toml"))
+        return patch(
+            "pkgdb.config.get_config_path",
+            return_value=Path("/nonexistent/config.toml"),
+        )
 
     @staticmethod
     def _seed(temp_db, packages_with_totals):
@@ -2021,7 +2229,8 @@ class TestTagCommands:
         for pkg, total in packages_with_totals:
             add_package(conn, pkg)
             store_stats(
-                conn, pkg,
+                conn,
+                pkg,
                 {"last_day": 1, "last_week": 7, "last_month": 10, "total": total},
             )
         conn.close()
@@ -2101,8 +2310,10 @@ class TestReleasesCommand:
     """Tests for the releases CLI command."""
 
     def _no_config(self):
-        return patch("pkgdb.config.get_config_path",
-                     return_value=Path("/nonexistent/config.toml"))
+        return patch(
+            "pkgdb.config.get_config_path",
+            return_value=Path("/nonexistent/config.toml"),
+        )
 
     def test_releases_parser_exists(self):
         """releases command should be in the parser."""
@@ -2122,9 +2333,14 @@ class TestReleasesCommand:
             PyPIRelease(version="0.1.0", upload_date="2025-01-15"),
         ]
 
-        with patch("sys.argv", ["pkgdb", "-d", temp_db, "releases", "my-pkg", "--json"]):
-            with patch.object(PackageStatsService, "fetch_package_releases",
-                              return_value=(mock_pypi, [])):
+        with patch(
+            "sys.argv", ["pkgdb", "-d", temp_db, "releases", "my-pkg", "--json"]
+        ):
+            with patch.object(
+                PackageStatsService,
+                "fetch_package_releases",
+                return_value=(mock_pypi, []),
+            ):
                 with self._no_config():
                     main()
 
@@ -2146,8 +2362,11 @@ class TestReleasesCommand:
         ]
 
         with patch("sys.argv", ["pkgdb", "-d", temp_db, "releases", "my-pkg"]):
-            with patch.object(PackageStatsService, "fetch_package_releases",
-                              return_value=(mock_pypi, mock_gh)):
+            with patch.object(
+                PackageStatsService,
+                "fetch_package_releases",
+                return_value=(mock_pypi, mock_gh),
+            ):
                 with self._no_config():
                     main()
 
@@ -2160,8 +2379,9 @@ class TestReleasesCommand:
     def test_releases_no_releases(self, temp_db, caplog):
         """releases should warn when no releases found."""
         with patch("sys.argv", ["pkgdb", "-d", temp_db, "releases", "my-pkg"]):
-            with patch.object(PackageStatsService, "fetch_package_releases",
-                              return_value=([], [])):
+            with patch.object(
+                PackageStatsService, "fetch_package_releases", return_value=([], [])
+            ):
                 with self._no_config():
                     main()
 
@@ -2181,14 +2401,18 @@ class TestHistoryDailySeries:
     """Tests for history rendering the true daily download series (Step 2)."""
 
     def _no_config(self):
-        return patch("pkgdb.config.get_config_path",
-                     return_value=Path("/nonexistent/config.toml"))
+        return patch(
+            "pkgdb.config.get_config_path",
+            return_value=Path("/nonexistent/config.toml"),
+        )
 
     @staticmethod
-    def _seed_daily(temp_db, package, rows, dimension="overall",
-                    category="without_mirrors"):
+    def _seed_daily(
+        temp_db, package, rows, dimension="overall", category="without_mirrors"
+    ):
         """Seed daily_downloads rows: rows is a list of (date, downloads)."""
         from pkgdb import store_daily_downloads
+
         conn = get_db_connection(temp_db)
         init_db(conn)
         add_package(conn, package)
@@ -2196,8 +2420,12 @@ class TestHistoryDailySeries:
             conn,
             package,
             [
-                {"date": d, "dimension": dimension,
-                 "category": category, "downloads": n}
+                {
+                    "date": d,
+                    "dimension": dimension,
+                    "category": category,
+                    "downloads": n,
+                }
                 for d, n in rows
             ],
         )
@@ -2206,11 +2434,11 @@ class TestHistoryDailySeries:
     def test_text_prefers_daily_series(self, temp_db, capsys):
         """--text should show the per-day series when daily data exists."""
         self._seed_daily(
-            temp_db, "my-pkg",
+            temp_db,
+            "my-pkg",
             [("2026-06-01", 100), ("2026-06-02", 120), ("2026-06-03", 90)],
         )
-        with patch("sys.argv",
-                   ["pkgdb", "-d", temp_db, "history", "my-pkg", "--text"]):
+        with patch("sys.argv", ["pkgdb", "-d", temp_db, "history", "my-pkg", "--text"]):
             with self._no_config():
                 main()
         out = capsys.readouterr().out
@@ -2223,10 +2451,11 @@ class TestHistoryDailySeries:
     def test_json_prefers_daily_series(self, temp_db, capsys):
         """--json should emit the per-day series when daily data exists."""
         self._seed_daily(
-            temp_db, "my-pkg", [("2026-06-01", 100), ("2026-06-02", 120)],
+            temp_db,
+            "my-pkg",
+            [("2026-06-01", 100), ("2026-06-02", 120)],
         )
-        with patch("sys.argv",
-                   ["pkgdb", "-d", temp_db, "history", "my-pkg", "--json"]):
+        with patch("sys.argv", ["pkgdb", "-d", temp_db, "history", "my-pkg", "--json"]):
             with self._no_config():
                 main()
         data = json.loads(capsys.readouterr().out)
@@ -2238,11 +2467,23 @@ class TestHistoryDailySeries:
     def test_json_filters_daily_by_since(self, temp_db, capsys):
         """--since should filter the daily series."""
         self._seed_daily(
-            temp_db, "my-pkg",
+            temp_db,
+            "my-pkg",
             [("2026-06-01", 100), ("2026-06-05", 120), ("2026-06-10", 90)],
         )
-        with patch("sys.argv", ["pkgdb", "-d", temp_db, "history", "my-pkg",
-                                 "--json", "--since", "2026-06-05"]):
+        with patch(
+            "sys.argv",
+            [
+                "pkgdb",
+                "-d",
+                temp_db,
+                "history",
+                "my-pkg",
+                "--json",
+                "--since",
+                "2026-06-05",
+            ],
+        ):
             with self._no_config():
                 main()
         data = json.loads(capsys.readouterr().out)
@@ -2260,8 +2501,7 @@ class TestHistoryDailySeries:
         )
         conn.commit()
         conn.close()
-        with patch("sys.argv",
-                   ["pkgdb", "-d", temp_db, "history", "my-pkg", "--text"]):
+        with patch("sys.argv", ["pkgdb", "-d", temp_db, "history", "my-pkg", "--text"]):
             with self._no_config():
                 main()
         out = capsys.readouterr().out
@@ -2285,16 +2525,19 @@ class TestHistoryDailySeries:
         output = os.path.join(os.path.dirname(temp_db), "daily_report.html")
         service = PackageStatsService(temp_db)
         with (
-            patch.object(PackageStatsService, "fetch_package_releases",
-                         return_value=([], [])),
+            patch.object(
+                PackageStatsService, "fetch_package_releases", return_value=([], [])
+            ),
             patch("pkgdb.reports.fetch_python_versions", return_value=None),
             patch("pkgdb.reports.fetch_os_stats", return_value=None),
         ):
             assert service.generate_project_report("my-pkg", output) is True
 
         html = Path(output).read_text()
-        assert "Daily Downloads &amp; Releases" in html or \
-               "Daily Downloads & Releases" in html
+        assert (
+            "Daily Downloads &amp; Releases" in html
+            or "Daily Downloads & Releases" in html
+        )
         Path(output).unlink(missing_ok=True)
 
 
@@ -2313,12 +2556,14 @@ class TestHistoryHtmlFiltering:
         rows = []
         for i in range(days):
             date = f"2024-01-{i + 1:02d}"
-            rows.append({
-                "date": date,
-                "dimension": "overall",
-                "category": "without_mirrors",
-                "downloads": 100 + i,
-            })
+            rows.append(
+                {
+                    "date": date,
+                    "dimension": "overall",
+                    "category": "without_mirrors",
+                    "downloads": 100 + i,
+                }
+            )
             conn.execute(
                 "INSERT INTO package_stats (package_name, fetch_date, last_day,"
                 " last_week, last_month, total) VALUES (?, ?, ?, ?, ?, ?)",
@@ -2333,14 +2578,24 @@ class TestHistoryHtmlFiltering:
         with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as f:
             output_path = f.name
         try:
-            argv = ["pkgdb", "-d", temp_db, "history", "test-pkg",
-                    "-o", output_path, "--no-browser"] + extra_args
+            argv = [
+                "pkgdb",
+                "-d",
+                temp_db,
+                "history",
+                "test-pkg",
+                "-o",
+                output_path,
+                "--no-browser",
+            ] + extra_args
             with patch("sys.argv", argv):
                 with patch(
                     "pkgdb.service.PackageStatsService.fetch_package_releases",
                     return_value=([], []),
                 ):
-                    with patch("pkgdb.reports.fetch_python_versions", return_value=None):
+                    with patch(
+                        "pkgdb.reports.fetch_python_versions", return_value=None
+                    ):
                         with patch("pkgdb.reports.fetch_os_stats", return_value=None):
                             main()
             return Path(output_path).read_text()
@@ -2365,8 +2620,18 @@ class TestHistoryHtmlFiltering:
         with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as f:
             output_path = f.name
         try:
-            argv = ["pkgdb", "-d", temp_db, "history", "test-pkg",
-                    "-o", output_path, "--no-browser", "--since", "7d"]
+            argv = [
+                "pkgdb",
+                "-d",
+                temp_db,
+                "history",
+                "test-pkg",
+                "-o",
+                output_path,
+                "--no-browser",
+                "--since",
+                "7d",
+            ]
             with patch("sys.argv", argv):
                 main()
             assert not Path(output_path).read_text()

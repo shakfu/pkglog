@@ -114,3 +114,45 @@ class CheckEvent(TypedDict, total=False):
     # Milestone field (kind: milestone)
     milestone: int
     total: int
+
+
+# Normalized CI states. Derived by the GitHub client from a run's status and
+# conclusion, stored verbatim by the database, so both modules share them.
+CI_STATE_PASS = "PASS"
+CI_STATE_FAIL = "FAIL"
+CI_STATE_RUNNING = "RUNNING"
+CI_STATE_UNKNOWN = "UNKNOWN"
+# No workflow run exists for the repository (or the scanned branch).
+CI_STATE_NO_RUNS = "NO_RUNS"
+
+
+class RepoRecord(TypedDict):
+    """A repository in the scan registry.
+
+    ``source`` is ``"package"``, ``"discover"`` or ``"manual"``.
+    ``has_workflows`` is None when it has not been probed.
+    """
+
+    repo_key: str
+    source: str
+    has_workflows: int | None
+    enabled: int
+    default_branch: str | None
+    added_date: str
+
+
+class CIRun(TypedDict):
+    """The latest known state of one workflow in one repository.
+
+    ``first_failed_at`` is the start of the run that began the current failing
+    streak, and is None whenever the workflow is not failing.
+    """
+
+    repo_key: str
+    workflow_name: str
+    state: str
+    branch: str | None
+    run_id: int | None
+    run_url: str | None
+    run_started_at: str | None
+    first_failed_at: str | None

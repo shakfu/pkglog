@@ -92,7 +92,9 @@ class TestPackageStatsService:
 
         # Add package (skip verify for testing)
         assert service.add_package("test-package", verify=False) is True
-        assert service.add_package("test-package", verify=False) is False  # Already exists
+        assert (
+            service.add_package("test-package", verify=False) is False
+        )  # Already exists
 
         # List packages
         packages = service.list_packages()
@@ -126,12 +128,12 @@ class TestPackageStatsService:
         service = PackageStatsService(temp_db)
         service.add_package("test-pkg", verify=False)
 
-        recent_response = json.dumps({
-            "data": {"last_day": 100, "last_week": 700, "last_month": 3000}
-        })
-        overall_response = json.dumps({
-            "data": [{"category": "without_mirrors", "downloads": 50000}]
-        })
+        recent_response = json.dumps(
+            {"data": {"last_day": 100, "last_week": 700, "last_month": 3000}}
+        )
+        overall_response = json.dumps(
+            {"data": [{"category": "without_mirrors", "downloads": 50000}]}
+        )
 
         progress_calls = []
 
@@ -166,8 +168,16 @@ class TestPackageStatsService:
         overall_daily = json.dumps(
             {
                 "data": [
-                    {"category": "without_mirrors", "date": "2026-01-01", "downloads": 100},
-                    {"category": "without_mirrors", "date": "2026-01-02", "downloads": 150},
+                    {
+                        "category": "without_mirrors",
+                        "date": "2026-01-01",
+                        "downloads": 100,
+                    },
+                    {
+                        "category": "without_mirrors",
+                        "date": "2026-01-02",
+                        "downloads": 150,
+                    },
                 ]
             }
         )
@@ -214,12 +224,24 @@ class TestPackageStatsService:
 
         service = PackageStatsService(temp_db)
         service.add_package("my-pkg", verify=False)
-        rows = [{"date": f"2026-06-{i:02d}", "dimension": "overall",
-                 "category": "without_mirrors", "downloads": 10}
-                for i in range(1, 8)]
-        rows += [{"date": f"2026-06-{i:02d}", "dimension": "overall",
-                  "category": "without_mirrors", "downloads": 25}
-                 for i in range(8, 15)]
+        rows = [
+            {
+                "date": f"2026-06-{i:02d}",
+                "dimension": "overall",
+                "category": "without_mirrors",
+                "downloads": 10,
+            }
+            for i in range(1, 8)
+        ]
+        rows += [
+            {
+                "date": f"2026-06-{i:02d}",
+                "dimension": "overall",
+                "category": "without_mirrors",
+                "downloads": 25,
+            }
+            for i in range(8, 15)
+        ]
         with get_db(temp_db) as conn:
             store_daily_downloads(conn, "my-pkg", rows)
 
@@ -240,8 +262,12 @@ class TestPackageStatsService:
         d0 = datetime.strptime("2026-01-05", "%Y-%m-%d").date()
         values = [100] * 56 + [220] * 7
         rows = [
-            {"date": (d0 + timedelta(days=i)).isoformat(), "dimension": "overall",
-             "category": "without_mirrors", "downloads": v}
+            {
+                "date": (d0 + timedelta(days=i)).isoformat(),
+                "dimension": "overall",
+                "category": "without_mirrors",
+                "downloads": v,
+            }
             for i, v in enumerate(values)
         ]
         with get_db(temp_db) as conn:
@@ -270,7 +296,8 @@ class TestPackageStatsService:
         for p in ("a", "b", "c"):
             service.add_package(p, verify=False)
             store_stats(
-                self._conn(temp_db), p,
+                self._conn(temp_db),
+                p,
                 {"last_day": 1, "last_week": 7, "last_month": 30, "total": 100},
             )
         service.add_tag("a", "web")
@@ -284,7 +311,8 @@ class TestPackageStatsService:
         for p, total in (("a", 100), ("b", 250), ("c", 40)):
             service.add_package(p, verify=False)
             store_stats(
-                conn, p,
+                conn,
+                p,
                 {"last_day": 1, "last_week": 7, "last_month": 10, "total": total},
             )
         service.add_tag("a", "web")
@@ -301,6 +329,7 @@ class TestPackageStatsService:
     @staticmethod
     def _conn(temp_db):
         from pkgdb import get_db_connection, init_db
+
         conn = get_db_connection(temp_db)
         init_db(conn)
         return conn
@@ -406,23 +435,27 @@ class TestPackageStatsService:
         """Service should fetch detailed package info."""
         service = PackageStatsService(temp_db)
 
-        recent_response = json.dumps({
-            "data": {"last_day": 100, "last_week": 700, "last_month": 3000}
-        })
-        overall_response = json.dumps({
-            "data": [{"category": "without_mirrors", "downloads": 50000}]
-        })
-        python_response = json.dumps({
-            "data": [{"category": "3.11", "downloads": 2000}]
-        })
-        system_response = json.dumps({
-            "data": [{"category": "Linux", "downloads": 4000}]
-        })
+        recent_response = json.dumps(
+            {"data": {"last_day": 100, "last_week": 700, "last_month": 3000}}
+        )
+        overall_response = json.dumps(
+            {"data": [{"category": "without_mirrors", "downloads": 50000}]}
+        )
+        python_response = json.dumps(
+            {"data": [{"category": "3.11", "downloads": 2000}]}
+        )
+        system_response = json.dumps(
+            {"data": [{"category": "Linux", "downloads": 4000}]}
+        )
 
         with patch("pkgdb.api.pypistats.recent", return_value=recent_response):
             with patch("pkgdb.api.pypistats.overall", return_value=overall_response):
-                with patch("pkgdb.api.pypistats.python_minor", return_value=python_response):
-                    with patch("pkgdb.api.pypistats.system", return_value=system_response):
+                with patch(
+                    "pkgdb.api.pypistats.python_minor", return_value=python_response
+                ):
+                    with patch(
+                        "pkgdb.api.pypistats.system", return_value=system_response
+                    ):
                         details = service.fetch_package_details("test-pkg")
 
         assert isinstance(details, PackageDetails)
@@ -449,9 +482,7 @@ class TestPackageStatsService:
         track(conn, "test-pkg")
         conn.close()
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".html", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
             output_path = f.name
 
         try:
@@ -467,9 +498,7 @@ class TestPackageStatsService:
         """Service should return False for empty report."""
         service = PackageStatsService(temp_db)
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".html", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
             output_path = f.name
 
         try:
@@ -665,21 +694,30 @@ class TestServicePathValidation:
 
         python_response = json.dumps({"data": []})
         system_response = json.dumps({"data": []})
-        recent_response = json.dumps({
-            "data": {"last_day": 100, "last_week": 700, "last_month": 3000}
-        })
-        overall_response = json.dumps({
-            "data": [{"category": "without_mirrors", "downloads": 50000}]
-        })
+        recent_response = json.dumps(
+            {"data": {"last_day": 100, "last_week": 700, "last_month": 3000}}
+        )
+        overall_response = json.dumps(
+            {"data": [{"category": "without_mirrors", "downloads": 50000}]}
+        )
 
         # Invalid extension should fail
         with tempfile.TemporaryDirectory() as tmpdir:
             bad_path = os.path.join(tmpdir, "report.csv")
             with pytest.raises(ValueError) as exc_info:
-                with patch("pkgdb.api.pypistats.python_minor", return_value=python_response):
-                    with patch("pkgdb.api.pypistats.system", return_value=system_response):
-                        with patch("pkgdb.api.pypistats.recent", return_value=recent_response):
-                            with patch("pkgdb.api.pypistats.overall", return_value=overall_response):
+                with patch(
+                    "pkgdb.api.pypistats.python_minor", return_value=python_response
+                ):
+                    with patch(
+                        "pkgdb.api.pypistats.system", return_value=system_response
+                    ):
+                        with patch(
+                            "pkgdb.api.pypistats.recent", return_value=recent_response
+                        ):
+                            with patch(
+                                "pkgdb.api.pypistats.overall",
+                                return_value=overall_response,
+                            ):
                                 service.generate_package_report("test-pkg", bad_path)
             assert "extension" in str(exc_info.value).lower()
 
@@ -743,6 +781,7 @@ class TestServicePackageVerification:
     def test_add_package_network_error_warns_but_allows(self, temp_db, caplog):
         """add_package warns on network error but allows addition."""
         import logging
+
         service = PackageStatsService(temp_db)
 
         with patch("pkgdb.service.check_package_exists") as mock_check:
@@ -763,6 +802,7 @@ class TestServicePackageVerification:
             file_path = f.name
 
         try:
+
             def mock_check(name):
                 if name == "nonexistent-pkg":
                     return (False, None)
@@ -926,14 +966,18 @@ class TestRemovedPackageVisibility:
             ('drop-pkg', '2024-01-02', 22, 154, 660, 9900)
         """)
         for pkg in ("keep-pkg", "drop-pkg"):
-            store_daily_downloads(conn, pkg, [
-                {
-                    "date": "2024-01-01",
-                    "dimension": "overall",
-                    "category": "without_mirrors",
-                    "downloads": 500,
-                }
-            ])
+            store_daily_downloads(
+                conn,
+                pkg,
+                [
+                    {
+                        "date": "2024-01-01",
+                        "dimension": "overall",
+                        "category": "without_mirrors",
+                        "downloads": 500,
+                    }
+                ],
+            )
         track(conn, "keep-pkg", "drop-pkg")
         conn.close()
 

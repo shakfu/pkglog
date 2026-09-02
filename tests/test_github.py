@@ -2,6 +2,7 @@
 
 import json
 import os
+import subprocess
 import time
 from datetime import datetime, timedelta
 
@@ -178,7 +179,11 @@ class TestRepoResult:
 
     def test_success_with_stats(self):
         stats = _make_repo_stats()
-        result = RepoResult(package_name="test-pkg", repo_url="https://github.com/test/repo", stats=stats)
+        result = RepoResult(
+            package_name="test-pkg",
+            repo_url="https://github.com/test/repo",
+            stats=stats,
+        )
         assert result.success is True
 
     def test_failure_with_error(self):
@@ -186,7 +191,9 @@ class TestRepoResult:
         assert result.success is False
 
     def test_no_github_repo(self):
-        result = RepoResult(package_name="test-pkg", repo_url=None, error="No GitHub repository found")
+        result = RepoResult(
+            package_name="test-pkg", repo_url=None, error="No GitHub repository found"
+        )
         assert result.success is False
         assert result.repo_url is None
 
@@ -250,14 +257,16 @@ class TestExtractGithubUrl:
     """Tests for extract_github_url function."""
 
     def test_extract_from_project_urls_repository(self):
-        mock_response = json.dumps({
-            "info": {
-                "project_urls": {
-                    "Repository": "https://github.com/owner/repo",
-                    "Homepage": "https://example.com",
+        mock_response = json.dumps(
+            {
+                "info": {
+                    "project_urls": {
+                        "Repository": "https://github.com/owner/repo",
+                        "Homepage": "https://example.com",
+                    }
                 }
             }
-        }).encode()
+        ).encode()
 
         mock_resp = MagicMock()
         mock_resp.read.return_value = mock_response
@@ -269,13 +278,15 @@ class TestExtractGithubUrl:
         assert url == "https://github.com/owner/repo"
 
     def test_extract_from_project_urls_source(self):
-        mock_response = json.dumps({
-            "info": {
-                "project_urls": {
-                    "Source": "https://github.com/owner/repo",
+        mock_response = json.dumps(
+            {
+                "info": {
+                    "project_urls": {
+                        "Source": "https://github.com/owner/repo",
+                    }
                 }
             }
-        }).encode()
+        ).encode()
 
         mock_resp = MagicMock()
         mock_resp.read.return_value = mock_response
@@ -287,14 +298,16 @@ class TestExtractGithubUrl:
         assert url == "https://github.com/owner/repo"
 
     def test_extract_from_home_page_fallback(self):
-        mock_response = json.dumps({
-            "info": {
-                "home_page": "https://github.com/owner/repo",
-                "project_urls": {
-                    "Documentation": "https://docs.example.com",
-                },
+        mock_response = json.dumps(
+            {
+                "info": {
+                    "home_page": "https://github.com/owner/repo",
+                    "project_urls": {
+                        "Documentation": "https://docs.example.com",
+                    },
+                }
             }
-        }).encode()
+        ).encode()
 
         mock_resp = MagicMock()
         mock_resp.read.return_value = mock_response
@@ -306,14 +319,16 @@ class TestExtractGithubUrl:
         assert url == "https://github.com/owner/repo"
 
     def test_extract_no_github_url(self):
-        mock_response = json.dumps({
-            "info": {
-                "home_page": "https://example.com",
-                "project_urls": {
-                    "Homepage": "https://example.com",
-                },
+        mock_response = json.dumps(
+            {
+                "info": {
+                    "home_page": "https://example.com",
+                    "project_urls": {
+                        "Homepage": "https://example.com",
+                    },
+                }
             }
-        }).encode()
+        ).encode()
 
         mock_resp = MagicMock()
         mock_resp.read.return_value = mock_response
@@ -350,6 +365,85 @@ class TestGetGithubToken:
         with patch.dict(os.environ, {}, clear=True):
             assert get_github_token() is None
 
+    def test_falls_back_to_the_gh_cli(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("pkgdb.github._gh_cli_token", return_value="gh-cli-token"):
+                assert get_github_token() == "gh-cli-token"
+
+    def test_env_overrides_the_gh_cli(self):
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "env-token"}, clear=True):
+            with patch(
+                "pkgdb.github._gh_cli_token",
+                side_effect=AssertionError("gh must not be consulted"),
+            ):
+                assert get_github_token() == "env-token"
+
+
+class TestGhCliToken:
+    """The `gh auth token` fallback.
+
+    The autouse fixture in conftest makes the subprocess unavailable and clears
+    the resolution cache around every test, so each of these starts cold.
+    """
+
+    def test_reads_the_token(self):
+        from pkgdb.github import _gh_cli_token
+
+        completed = MagicMock(returncode=0, stdout="gho_secret\n")
+        with patch("pkgdb.github.subprocess.run", return_value=completed):
+            assert _gh_cli_token() == "gho_secret"
+
+    def test_queries_github_com_explicitly(self):
+        from pkgdb.github import _gh_cli_token
+
+        completed = MagicMock(returncode=0, stdout="gho_secret")
+        with patch("pkgdb.github.subprocess.run", return_value=completed) as run:
+            _gh_cli_token()
+        assert run.call_args[0][0] == [
+            "gh",
+            "auth",
+            "token",
+            "--hostname",
+            "github.com",
+        ]
+
+    def test_not_logged_in(self):
+        from pkgdb.github import _gh_cli_token
+
+        completed = MagicMock(returncode=1, stdout="")
+        with patch("pkgdb.github.subprocess.run", return_value=completed):
+            assert _gh_cli_token() is None
+
+    def test_empty_output(self):
+        from pkgdb.github import _gh_cli_token
+
+        completed = MagicMock(returncode=0, stdout="\n")
+        with patch("pkgdb.github.subprocess.run", return_value=completed):
+            assert _gh_cli_token() is None
+
+    def test_gh_not_installed(self):
+        from pkgdb.github import _gh_cli_token
+
+        assert _gh_cli_token() is None  # the fixture removes the subprocess
+
+    def test_gh_hangs(self):
+        from pkgdb.github import _gh_cli_token
+
+        with patch(
+            "pkgdb.github.subprocess.run",
+            side_effect=subprocess.TimeoutExpired("gh", 10),
+        ):
+            assert _gh_cli_token() is None
+
+    def test_resolved_only_once(self):
+        from pkgdb.github import _gh_cli_token
+
+        completed = MagicMock(returncode=0, stdout="gho_secret")
+        with patch("pkgdb.github.subprocess.run", return_value=completed) as run:
+            _gh_cli_token()
+            _gh_cli_token()
+        assert run.call_count == 1
+
 
 class TestFetchPackageGithubStats:
     """Tests for fetch_package_github_stats function."""
@@ -360,15 +454,19 @@ class TestFetchPackageGithubStats:
 
         api_data = _make_github_api_response()
         mock_api_resp = json.dumps(api_data).encode()
-        pypi_data = json.dumps({
-            "info": {
-                "project_urls": {"Repository": "https://github.com/testowner/testrepo"},
+        pypi_data = json.dumps(
+            {
+                "info": {
+                    "project_urls": {
+                        "Repository": "https://github.com/testowner/testrepo"
+                    },
+                }
             }
-        }).encode()
+        ).encode()
 
         def mock_urlopen(req, **kwargs):
             mock_resp = MagicMock()
-            url = req.full_url if hasattr(req, 'full_url') else str(req)
+            url = req.full_url if hasattr(req, "full_url") else str(req)
             if "pypi.org" in url:
                 mock_resp.read.return_value = pypi_data
             else:
@@ -390,9 +488,9 @@ class TestFetchPackageGithubStats:
         conn = get_db_connection(temp_db)
         init_db(conn)
 
-        pypi_data = json.dumps({
-            "info": {"project_urls": {"Homepage": "https://example.com"}}
-        }).encode()
+        pypi_data = json.dumps(
+            {"info": {"project_urls": {"Homepage": "https://example.com"}}}
+        ).encode()
 
         mock_resp = MagicMock()
         mock_resp.read.return_value = pypi_data
@@ -534,3 +632,124 @@ class TestOpenIssueCount:
         assert len(urls) == 1
         assert "/search/" in urls[0]
         conn.close()
+
+
+class TestUnauthenticatedWarning:
+    """An unauthenticated run must say so, or its gaps look like GitHub's fault."""
+
+    def test_warns_when_there_is_no_token(self, caplog):
+        from pkgdb.github import _github_headers
+
+        with patch.dict(os.environ, {}, clear=True):
+            with caplog.at_level("WARNING"):
+                _github_headers()
+        assert "No GitHub token found" in caplog.text
+        assert "60 requests/hour" in caplog.text
+
+    def test_warns_only_once(self, caplog):
+        from pkgdb.github import _github_headers
+
+        with patch.dict(os.environ, {}, clear=True):
+            with caplog.at_level("WARNING"):
+                for _ in range(5):
+                    _github_headers()
+        assert caplog.text.count("No GitHub token found") == 1
+
+    def test_silent_with_a_token(self, caplog):
+        from pkgdb.github import _github_headers
+
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "t"}, clear=True):
+            with caplog.at_level("WARNING"):
+                headers = _github_headers()
+        assert headers["Authorization"] == "Bearer t"
+        assert "No GitHub token" not in caplog.text
+
+
+class TestRateLimitExhaustion:
+    """An exhausted quota is not a retryable 403."""
+
+    @staticmethod
+    def _http_error(headers):
+        from urllib.error import HTTPError
+
+        return HTTPError("https://api.github.com/x", 403, "forbidden", headers, None)
+
+    def test_exhausted_is_not_retried(self):
+        from urllib.error import HTTPError
+
+        from pkgdb.github import _fetch_json
+
+        error = self._http_error({"x-ratelimit-remaining": "0"})
+        with patch("pkgdb.github.urlopen", side_effect=error) as mock:
+            with patch("pkgdb.github.time.sleep") as sleep:
+                with pytest.raises(HTTPError):
+                    _fetch_json("https://api.github.com/x", {}, max_retries=3)
+        assert mock.call_count == 1
+        sleep.assert_not_called()
+
+    def test_a_403_with_quota_left_still_retries(self):
+        from urllib.error import HTTPError
+
+        from pkgdb.github import _fetch_json
+
+        error = self._http_error({"x-ratelimit-remaining": "42"})
+        with patch("pkgdb.github.urlopen", side_effect=error) as mock:
+            with patch("pkgdb.github.time.sleep"):
+                with pytest.raises(HTTPError):
+                    _fetch_json("https://api.github.com/x", {}, max_retries=2)
+        assert mock.call_count == 3
+
+    def test_a_403_without_the_header_still_retries(self):
+        from urllib.error import HTTPError
+
+        from pkgdb.github import _fetch_json
+
+        with patch("pkgdb.github.urlopen", side_effect=self._http_error({})) as mock:
+            with patch("pkgdb.github.time.sleep"):
+                with pytest.raises(HTTPError):
+                    _fetch_json("https://api.github.com/x", {}, max_retries=2)
+        assert mock.call_count == 3
+
+    def test_exhaustion_is_reported_with_its_reset_time(self, caplog):
+        from urllib.error import HTTPError
+
+        from pkgdb.github import _fetch_json
+
+        reset = int(datetime(2026, 9, 2, 14, 30).timestamp())
+        error = self._http_error(
+            {"x-ratelimit-remaining": "0", "x-ratelimit-reset": str(reset)}
+        )
+        with patch("pkgdb.github.urlopen", side_effect=error):
+            with caplog.at_level("WARNING"):
+                with pytest.raises(HTTPError):
+                    _fetch_json("https://api.github.com/x", {})
+        assert "rate limit exhausted" in caplog.text
+        assert "resets at 14:30" in caplog.text
+
+    def test_exhaustion_is_reported_once(self, caplog):
+        from urllib.error import HTTPError
+
+        from pkgdb.github import _fetch_json
+
+        error = self._http_error({"x-ratelimit-remaining": "0"})
+        with patch("pkgdb.github.urlopen", side_effect=error):
+            with caplog.at_level("WARNING"):
+                for _ in range(3):
+                    with pytest.raises(HTTPError):
+                        _fetch_json("https://api.github.com/x", {})
+        assert caplog.text.count("rate limit exhausted") == 1
+
+    def test_a_scan_reports_exhaustion_as_unknown_not_passing(self, temp_db):
+        # The whole point of not retrying: the repo comes back unknown, and
+        # the exit code stays clean because unreachable is not broken.
+        from pkgdb.service import PackageStatsService
+
+        error = self._http_error({"x-ratelimit-remaining": "0"})
+        service = PackageStatsService(temp_db)
+        service.add_repo("o/r")
+        with patch("pkgdb.github.urlopen", side_effect=error):
+            with patch("pkgdb.github.time.sleep") as sleep:
+                results = service.fetch_ci_status(branch="main")
+        assert results[0].error is not None
+        assert results[0].failures == []
+        sleep.assert_not_called()

@@ -21,15 +21,17 @@ class TestFetchPackageStats:
 
     def test_fetch_package_stats_parses_response(self):
         """fetch_package_stats should parse pypistats responses correctly."""
-        recent_response = json.dumps({
-            "data": {"last_day": 100, "last_week": 700, "last_month": 3000}
-        })
-        overall_response = json.dumps({
-            "data": [
-                {"category": "with_mirrors", "downloads": 100000},
-                {"category": "without_mirrors", "downloads": 50000},
-            ]
-        })
+        recent_response = json.dumps(
+            {"data": {"last_day": 100, "last_week": 700, "last_month": 3000}}
+        )
+        overall_response = json.dumps(
+            {
+                "data": [
+                    {"category": "with_mirrors", "downloads": 100000},
+                    {"category": "without_mirrors", "downloads": 50000},
+                ]
+            }
+        )
 
         with patch("pkgdb.api.pypistats.recent", return_value=recent_response):
             with patch("pkgdb.api.pypistats.overall", return_value=overall_response):
@@ -50,13 +52,15 @@ class TestFetchPackageStats:
 
     def test_fetch_python_versions_parses_response(self):
         """fetch_python_versions should parse pypistats response correctly."""
-        mock_response = json.dumps({
-            "data": [
-                {"category": "3.10", "downloads": 1000},
-                {"category": "3.11", "downloads": 2000},
-                {"category": "3.9", "downloads": 500},
-            ]
-        })
+        mock_response = json.dumps(
+            {
+                "data": [
+                    {"category": "3.10", "downloads": 1000},
+                    {"category": "3.11", "downloads": 2000},
+                    {"category": "3.9", "downloads": 500},
+                ]
+            }
+        )
 
         with patch("pkgdb.api.pypistats.python_minor", return_value=mock_response):
             versions = fetch_python_versions("test-package")
@@ -69,20 +73,24 @@ class TestFetchPackageStats:
 
     def test_fetch_python_versions_handles_error(self, capsys):
         """fetch_python_versions should return None on error."""
-        with patch("pkgdb.api.pypistats.python_minor", side_effect=ValueError("API error")):
+        with patch(
+            "pkgdb.api.pypistats.python_minor", side_effect=ValueError("API error")
+        ):
             versions = fetch_python_versions("nonexistent-package")
 
         assert versions is None
 
     def test_fetch_os_stats_parses_response(self):
         """fetch_os_stats should parse pypistats response correctly."""
-        mock_response = json.dumps({
-            "data": [
-                {"category": "Linux", "downloads": 5000},
-                {"category": "Windows", "downloads": 2000},
-                {"category": "Darwin", "downloads": 1000},
-            ]
-        })
+        mock_response = json.dumps(
+            {
+                "data": [
+                    {"category": "Linux", "downloads": 5000},
+                    {"category": "Windows", "downloads": 2000},
+                    {"category": "Darwin", "downloads": 1000},
+                ]
+            }
+        )
 
         with patch("pkgdb.api.pypistats.system", return_value=mock_response):
             os_stats = fetch_os_stats("test-package")
@@ -183,7 +191,11 @@ class TestFetchDailyDownloads:
         response = json.dumps(
             {
                 "data": [
-                    {"category": "without_mirrors", "date": "2026-01-01", "downloads": 100},
+                    {
+                        "category": "without_mirrors",
+                        "date": "2026-01-01",
+                        "downloads": 100,
+                    },
                     {"category": None, "date": "2026-01-01", "downloads": 5},
                     {"category": "without_mirrors", "date": None, "downloads": 5},
                 ]
@@ -218,7 +230,11 @@ class TestFetchUserPackages:
     def test_fetch_user_packages_deduplicates(self):
         """fetch_user_packages should deduplicate packages."""
         # User might have multiple roles for same package
-        mock_packages = [["Owner", "pkg-a"], ["Maintainer", "pkg-a"], ["Owner", "pkg-b"]]
+        mock_packages = [
+            ["Owner", "pkg-a"],
+            ["Maintainer", "pkg-a"],
+            ["Owner", "pkg-b"],
+        ]
 
         with patch("pkgdb.api.xmlrpc.client.ServerProxy") as mock_proxy:
             mock_proxy.return_value.user_packages.return_value = mock_packages
@@ -239,7 +255,9 @@ class TestFetchUserPackages:
         import xmlrpc.client
 
         with patch("pkgdb.api.xmlrpc.client.ServerProxy") as mock_proxy:
-            mock_proxy.return_value.user_packages.side_effect = xmlrpc.client.Fault(1, "Error")
+            mock_proxy.return_value.user_packages.side_effect = xmlrpc.client.Fault(
+                1, "Error"
+            )
             result = fetch_user_packages("testuser")
 
         assert result is None
@@ -247,7 +265,9 @@ class TestFetchUserPackages:
     def test_fetch_user_packages_network_error(self):
         """fetch_user_packages should return None on network error."""
         with patch("pkgdb.api.xmlrpc.client.ServerProxy") as mock_proxy:
-            mock_proxy.return_value.user_packages.side_effect = OSError("Connection refused")
+            mock_proxy.return_value.user_packages.side_effect = OSError(
+                "Connection refused"
+            )
             result = fetch_user_packages("testuser")
 
         assert result is None
@@ -258,18 +278,18 @@ class TestAggregateEnvStats:
 
     def test_aggregate_env_stats_combines_packages(self):
         """aggregate_env_stats should combine stats from multiple packages."""
-        python_response_1 = json.dumps({
-            "data": [{"category": "3.11", "downloads": 2000}]
-        })
-        python_response_2 = json.dumps({
-            "data": [{"category": "3.11", "downloads": 1000}]
-        })
-        system_response_1 = json.dumps({
-            "data": [{"category": "Linux", "downloads": 4000}]
-        })
-        system_response_2 = json.dumps({
-            "data": [{"category": "Linux", "downloads": 2000}]
-        })
+        python_response_1 = json.dumps(
+            {"data": [{"category": "3.11", "downloads": 2000}]}
+        )
+        python_response_2 = json.dumps(
+            {"data": [{"category": "3.11", "downloads": 1000}]}
+        )
+        system_response_1 = json.dumps(
+            {"data": [{"category": "Linux", "downloads": 4000}]}
+        )
+        system_response_2 = json.dumps(
+            {"data": [{"category": "Linux", "downloads": 2000}]}
+        )
 
         call_count = {"python": 0, "system": 0}
 
@@ -294,8 +314,12 @@ class TestAggregateEnvStats:
 
     def test_aggregate_env_stats_handles_errors(self):
         """aggregate_env_stats should handle API errors gracefully."""
-        with patch("pkgdb.api.pypistats.python_minor", side_effect=ValueError("API error")):
-            with patch("pkgdb.api.pypistats.system", side_effect=ValueError("API error")):
+        with patch(
+            "pkgdb.api.pypistats.python_minor", side_effect=ValueError("API error")
+        ):
+            with patch(
+                "pkgdb.api.pypistats.system", side_effect=ValueError("API error")
+            ):
                 result = aggregate_env_stats(["pkg-a"])
 
         assert result["python_versions"] == []
@@ -315,7 +339,15 @@ class TestCheckPackageExists:
         """check_package_exists returns (True, None) for existing package."""
         # Mock a successful HEAD request
         with patch("pkgdb.api.urlopen") as mock_urlopen:
-            mock_response = type("MockResponse", (), {"status": 200, "__enter__": lambda s: s, "__exit__": lambda s, *a: None})()
+            mock_response = type(
+                "MockResponse",
+                (),
+                {
+                    "status": 200,
+                    "__enter__": lambda s: s,
+                    "__exit__": lambda s, *a: None,
+                },
+            )()
             mock_urlopen.return_value = mock_response
 
             exists, error = check_package_exists("requests")

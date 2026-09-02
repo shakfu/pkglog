@@ -188,6 +188,81 @@ pkgdb github clear                  # clear expired cache
 pkgdb github --json                 # includes a star_growth field
 ```
 
+### `pkgdb ci`
+
+Report the latest run of every GitHub Actions workflow in your repositories.
+Failures only unless `--all` is given, and exits non-zero when any workflow is
+failing, so it composes with shell and CI notifiers.
+
+Repositories come from the scan registry (`pkgdb repo`). Each is scanned on its
+own default branch unless `--branch` says otherwise, so a red run on a feature
+branch is not reported as broken CI.
+
+The "Failing" column is the age of the current failure streak, which separates a
+break from twenty minutes ago from one that has stood for months. It survives
+cancelled and in-progress runs and resets only when the workflow passes.
+
+Run listings are cached for an hour, so a repeat scan costs no requests.
+Repositories whose runs could not be fetched are reported as warnings and do not
+affect the exit code: unreachable is unknown, not broken.
+
+```bash
+pkgdb ci                            # failing workflows; exit 1 if any
+pkgdb ci --all                      # include passing workflows
+pkgdb ci --repo owner/name          # one repository, registry not required
+pkgdb ci --branch develop           # scan a specific branch everywhere
+pkgdb ci --json                     # machine-readable
+pkgdb ci --no-cache                 # bypass the one-hour cache
+pkgdb ci --exit-zero                # report but always exit 0
+pkgdb ci -o                         # also write ~/.pkgdb/ci-report.html and open it
+pkgdb ci -o out.html --no-browser   # write somewhere else, do not open
+```
+
+A workflow this scan did not see is forgotten, so a renamed or deleted workflow
+stops reporting its last failure. A repository whose runs could not be fetched
+keeps whatever was recorded before, because unreachable is unknown, not empty.
+
+CI status also appears in `pkgdb report --ci` and, once a scan has run, as a
+panel on the `pkgdb serve` dashboard. The dashboard renders the last recorded
+scan and never starts one of its own.
+
+Authentication is required in practice: unauthenticated GitHub allows 60
+requests an hour, which a 64-repository scan exhausts. If you are logged in with
+the `gh` CLI, pkgdb uses that token and there is nothing to set up. Otherwise set
+`GITHUB_TOKEN` or `GH_TOKEN`, which take precedence over `gh`.
+
+Without a token the scan still runs, but sees public repositories only and gives
+up partway through a large account. It warns once at the start that it is
+unauthenticated, and again if the quota runs out, naming the reset time.
+Repositories it could not reach are reported as warnings and counted as unknown,
+never as passing, and they do not affect the exit code.
+
+### `pkgdb repo`
+
+Manage the repository registry that `ci` scans.
+
+The registry exists because a package-derived repository list only reaches
+projects published to PyPI with a repository URL in their metadata. On a typical
+account that is a minority of the repositories that actually run CI.
+
+`discover` lists an account's repositories and records how many workflows each
+defines, so later scans skip the ones with no CI. The probe costs one request per
+repository, but only the first time each is seen. It also links tracked packages
+to same-named repositories, recovering the ones whose PyPI metadata carries no
+repository URL. Your own account is listed through the authenticated endpoint,
+so private repositories are included.
+
+```bash
+pkgdb repo discover --user <github-user>   # register an account's repos
+pkgdb repo discover --no-probe             # register without counting workflows
+pkgdb repo list                            # show the registry
+pkgdb repo add owner/name                  # register one repository
+pkgdb repo remove owner/name               # unregister it
+pkgdb repo --json list
+```
+
+Set `[github] user` in `config.toml` to omit `--user`.
+
 ### `pkgdb export`
 
 Export stats in various formats.
@@ -210,9 +285,14 @@ pkgdb report <package>              # single package
 pkgdb report <package> --project    # project view with releases
 pkgdb report -e                     # include environment data
 pkgdb report -g                     # include GitHub stats
+pkgdb report -c                     # include a CI status section
 pkgdb report -o custom.html
 pkgdb report --no-browser
 ```
+
+`-c/--ci` scans registered repositories and adds a CI section to the report.
+Run listings are cached for an hour, so a report regenerated soon after a
+`pkgdb ci` costs no requests. `pkgdb update --ci` does the same after fetching.
 
 ### `pkgdb badge <package>`
 

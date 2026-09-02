@@ -9,8 +9,7 @@ def _series(daily_values, start="2026-01-05"):
     """Build a contiguous daily series from a list of per-day download counts."""
     d0 = datetime.strptime(start, "%Y-%m-%d").date()
     return [
-        ((d0 + timedelta(days=i)).isoformat(), v)
-        for i, v in enumerate(daily_values)
+        ((d0 + timedelta(days=i)).isoformat(), v) for i, v in enumerate(daily_values)
     ]
 
 

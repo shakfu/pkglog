@@ -39,7 +39,7 @@ class TestIntegration:
 
     @pytest.mark.skipif(
         os.environ.get("RUN_INTEGRATION") != "1",
-        reason="Integration tests disabled (set RUN_INTEGRATION=1 to enable)"
+        reason="Integration tests disabled (set RUN_INTEGRATION=1 to enable)",
     )
     def test_fetch_real_package_stats(self):
         """fetch_package_stats should return real data for a known package."""
@@ -52,7 +52,7 @@ class TestIntegration:
 
     @pytest.mark.skipif(
         os.environ.get("RUN_INTEGRATION") != "1",
-        reason="Integration tests disabled (set RUN_INTEGRATION=1 to enable)"
+        reason="Integration tests disabled (set RUN_INTEGRATION=1 to enable)",
     )
     def test_fetch_real_python_versions(self):
         """fetch_python_versions should return real data for a known package."""
@@ -65,7 +65,7 @@ class TestIntegration:
 
     @pytest.mark.skipif(
         os.environ.get("RUN_INTEGRATION") != "1",
-        reason="Integration tests disabled (set RUN_INTEGRATION=1 to enable)"
+        reason="Integration tests disabled (set RUN_INTEGRATION=1 to enable)",
     )
     def test_fetch_real_os_stats(self):
         """fetch_os_stats should return real data for a known package."""
@@ -78,7 +78,7 @@ class TestIntegration:
 
     @pytest.mark.skipif(
         os.environ.get("RUN_INTEGRATION") != "1",
-        reason="Integration tests disabled (set RUN_INTEGRATION=1 to enable)"
+        reason="Integration tests disabled (set RUN_INTEGRATION=1 to enable)",
     )
     def test_fetch_nonexistent_package(self):
         """fetch_package_stats should return None for nonexistent package."""
@@ -117,8 +117,7 @@ class TestErrorPaths:
         store_stats(db_conn, "test-pkg", stats)
 
         cursor = db_conn.execute(
-            "SELECT * FROM package_stats WHERE package_name = ?",
-            ("test-pkg",)
+            "SELECT * FROM package_stats WHERE package_name = ?", ("test-pkg",)
         )
         row = cursor.fetchone()
         assert row is not None
@@ -166,12 +165,12 @@ class TestErrorPaths:
         """fetch_all_package_stats should handle partial failures."""
         from pkgdb.api import fetch_all_package_stats
 
-        recent_success = json.dumps({
-            "data": {"last_day": 100, "last_week": 700, "last_month": 3000}
-        })
-        overall_success = json.dumps({
-            "data": [{"category": "without_mirrors", "downloads": 50000}]
-        })
+        recent_success = json.dumps(
+            {"data": {"last_day": 100, "last_week": 700, "last_month": 3000}}
+        )
+        overall_success = json.dumps(
+            {"data": [{"category": "without_mirrors", "downloads": 50000}]}
+        )
 
         call_count = {"count": 0}
 
@@ -188,7 +187,9 @@ class TestErrorPaths:
 
         with patch("pkgdb.api.pypistats.recent", side_effect=mock_recent):
             with patch("pkgdb.api.pypistats.overall", side_effect=mock_overall):
-                results = fetch_all_package_stats(["good-pkg", "fail-pkg", "another-good"])
+                results = fetch_all_package_stats(
+                    ["good-pkg", "fail-pkg", "another-good"]
+                )
 
         # Should have results for all packages
         assert len(results) == 3
@@ -201,11 +202,23 @@ class TestErrorPaths:
     def test_generate_report_handles_missing_history_gracefully(self):
         """generate_html_report should work with None history values."""
         stats = [
-            {"package_name": "pkg", "total": 1000, "last_month": 300, "last_week": 70, "last_day": 10}
+            {
+                "package_name": "pkg",
+                "total": 1000,
+                "last_month": 300,
+                "last_week": 70,
+                "last_day": 10,
+            }
         ]
         history = {
             "pkg": [
-                {"fetch_date": "2024-01-01", "total": None, "last_month": None, "last_week": None, "last_day": None}
+                {
+                    "fetch_date": "2024-01-01",
+                    "total": None,
+                    "last_month": None,
+                    "last_week": None,
+                    "last_day": None,
+                }
             ]
         }
 
@@ -244,7 +257,7 @@ class TestPerformance:
 
     @pytest.mark.skipif(
         os.environ.get("RUN_SLOW_TESTS") != "1",
-        reason="Slow tests disabled (set RUN_SLOW_TESTS=1 to enable)"
+        reason="Slow tests disabled (set RUN_SLOW_TESTS=1 to enable)",
     )
     def test_large_number_of_packages(self, temp_db):
         """Database should handle 100+ packages efficiently."""
@@ -269,7 +282,7 @@ class TestPerformance:
 
     @pytest.mark.skipif(
         os.environ.get("RUN_SLOW_TESTS") != "1",
-        reason="Slow tests disabled (set RUN_SLOW_TESTS=1 to enable)"
+        reason="Slow tests disabled (set RUN_SLOW_TESTS=1 to enable)",
     )
     def test_large_historical_data(self, temp_db):
         """Database should handle 1000+ days of history efficiently."""
@@ -291,7 +304,7 @@ class TestPerformance:
                     (package_name, fetch_date, last_day, last_week, last_month, total)
                     VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (pkg_name, date, day * 10, day * 70, day * 300, day * 1000)
+                    (pkg_name, date, day * 10, day * 70, day * 300, day * 1000),
                 )
         conn.commit()
         insert_time = time.time() - start
@@ -309,7 +322,7 @@ class TestPerformance:
 
     @pytest.mark.skipif(
         os.environ.get("RUN_SLOW_TESTS") != "1",
-        reason="Slow tests disabled (set RUN_SLOW_TESTS=1 to enable)"
+        reason="Slow tests disabled (set RUN_SLOW_TESTS=1 to enable)",
     )
     def test_report_generation_performance(self, temp_db):
         """Report generation should complete in reasonable time."""
@@ -330,7 +343,14 @@ class TestPerformance:
                     (package_name, fetch_date, last_day, last_week, last_month, total)
                     VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (pkg_name, date, 100 + day, 700 + day * 7, 3000 + day * 30, 50000 + day * 100)
+                    (
+                        pkg_name,
+                        date,
+                        100 + day,
+                        700 + day * 7,
+                        3000 + day * 30,
+                        50000 + day * 100,
+                    ),
                 )
         conn.commit()
 
@@ -358,7 +378,7 @@ class TestPerformance:
 
     @pytest.mark.skipif(
         os.environ.get("RUN_SLOW_TESTS") != "1",
-        reason="Slow tests disabled (set RUN_SLOW_TESTS=1 to enable)"
+        reason="Slow tests disabled (set RUN_SLOW_TESTS=1 to enable)",
     )
     def test_get_stats_with_growth_performance(self, temp_db):
         """get_stats_with_growth should be efficient with many packages."""
@@ -380,7 +400,7 @@ class TestPerformance:
                     (package_name, fetch_date, last_day, last_week, last_month, total)
                     VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (pkg_name, date, 100, 700, 3000 + day * 10, 50000 + day * 100)
+                    (pkg_name, date, 100, 700, 3000 + day * 10, 50000 + day * 100),
                 )
         conn.commit()
 

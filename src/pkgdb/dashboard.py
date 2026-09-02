@@ -224,6 +224,11 @@ def generate_overview_page() -> str:
     """
     body = f"""{_nav("Overview")}
 
+<div class="card" id="ci-card" style="display:none">
+<h2>CI Status</h2>
+<div id="ci-wrap"></div>
+</div>
+
 <div class="card">
 <h2>Tracked Packages</h2>
 <input type="text" class="filter-input" id="pkg-filter"
@@ -243,7 +248,63 @@ document.addEventListener("DOMContentLoaded", function() {{
             document.getElementById("loading-msg").textContent =
                 "Error loading data: " + e.message;
         }});
+    fetch("/api/ci")
+        .then(r => r.json())
+        .then(rows => renderCI(rows))
+        .catch(function() {{ /* CI is optional; stay quiet when absent */ }});
 }});
+
+function esc(s) {{
+    var d = document.createElement("div");
+    d.textContent = s == null ? "" : String(s);
+    return d.innerHTML;
+}}
+
+function renderCI(rows) {{
+    // Hidden entirely until a scan has run, so the panel never nags.
+    if (!rows || !rows.length) return;
+    var card = document.getElementById("ci-card");
+    card.style.display = "";
+
+    var repos = {{}}, failingRepos = {{}};
+    var failures = [];
+    for (var i = 0; i < rows.length; i++) {{
+        repos[rows[i].repo_key] = 1;
+        if (rows[i].state === "FAIL") {{
+            failingRepos[rows[i].repo_key] = 1;
+            failures.push(rows[i]);
+        }}
+    }}
+    var nRepos = Object.keys(repos).length;
+    var nFailing = Object.keys(failingRepos).length;
+
+    if (!failures.length) {{
+        document.getElementById("ci-wrap").innerHTML =
+            '<p class="loading">All ' + nRepos + ' repositories are green.</p>';
+        return;
+    }}
+
+    var html = '<p class="loading">' + nFailing + ' of ' + nRepos +
+        ' repositories have failing workflows.</p>' +
+        '<table><thead><tr><th>Repository</th><th>Workflow</th>' +
+        '<th>Branch</th><th class="number">Failing</th><th>Run</th>' +
+        '</tr></thead><tbody>';
+    for (var j = 0; j < failures.length; j++) {{
+        var f = failures[j];
+        html += '<tr>' +
+            '<td><a href="https://github.com/' + encodeURI(f.repo_key) + '">' +
+            esc(f.repo_key) + '</a></td>' +
+            '<td>' + esc(f.workflow_name) + '</td>' +
+            '<td>' + esc(f.branch || "-") + '</td>' +
+            '<td class="number">' +
+            (f.failing_days == null ? "-" : f.failing_days + "d") + '</td>' +
+            '<td>' + (f.run_url
+                ? '<a href="' + encodeURI(f.run_url) + '">run</a>' : "-") +
+            '</td></tr>';
+    }}
+    html += '</tbody></table>';
+    document.getElementById("ci-wrap").innerHTML = html;
+}}
 
 function fmt(n) {{
     if (n == null) return "-";

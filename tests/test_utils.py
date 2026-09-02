@@ -25,8 +25,10 @@ class TestDailyWindowSums:
     def test_two_full_windows(self):
         # 4 consecutive days, window of 2
         series = [
-            ("2026-06-01", 10), ("2026-06-02", 20),
-            ("2026-06-03", 30), ("2026-06-04", 40),
+            ("2026-06-01", 10),
+            ("2026-06-02", 20),
+            ("2026-06-03", 30),
+            ("2026-06-04", 40),
         ]
         # current = 03+04 = 70, previous = 01+02 = 30 (anchored on max date)
         assert daily_window_sums(series, 2) == (70, 30)
@@ -353,5 +355,7 @@ class TestOutputPathValidation:
         """Non-writable parent should fail when must_be_writable=True."""
         # /usr should not be writable for normal users
         if os.name != "nt" and not os.access("/usr", os.W_OK):
-            is_valid, error = validate_output_path("/usr/output.html", must_be_writable=True)
+            is_valid, error = validate_output_path(
+                "/usr/output.html", must_be_writable=True
+            )
             assert not is_valid

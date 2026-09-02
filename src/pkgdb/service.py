@@ -1,7 +1,9 @@
 """Service layer for pkgdb - provides a clean abstraction over database and API operations."""
 
+import fnmatch
 import sqlite3
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -18,9 +20,23 @@ from .api import (
     fetch_user_packages,
 )
 from .db import (
+    REPO_SOURCE_DISCOVER,
+    REPO_SOURCE_MANUAL,
+    REPO_SOURCE_PACKAGE,
     add_package,
     add_package_tag,
+    add_repo,
     cleanup_orphaned_stats,
+    get_ci_status,
+    get_repo_packages,
+    get_repos,
+    link_package_repo,
+    normalize_repo_key,
+    prune_ci_status,
+    remove_repo,
+    seed_repos_from_cache,
+    set_repo_enabled,
+    store_ci_status,
     get_all_history,
     get_all_github_releases,
     get_all_pypi_releases,
@@ -65,20 +81,32 @@ from .checks import (
 )
 from .export import export_csv, export_json, export_markdown
 from .github import (
+    CI_RUN_WINDOW,
     RepoResult,
     clear_github_cache,
     extract_github_url,
+    fetch_default_branch,
     fetch_github_releases,
     fetch_package_github_stats,
+    fetch_user_repos,
+    fetch_workflow_count,
+    fetch_workflow_runs_raw,
+    get_cached_workflow_runs,
     get_github_cache_stats,
+    latest_run_per_workflow,
     parse_github_url,
+    parse_workflow_runs,
+    store_cached_workflow_runs,
 )
 from .reports import (
+    generate_ci_html_report,
     generate_html_report,
     generate_package_html_report,
     generate_project_html_report,
 )
 from .types import (
+    CI_STATE_FAIL,
+    CI_STATE_NO_RUNS,
     CategoryDownloads,
     CheckEvent,
     DailyDownload,
@@ -89,12 +117,22 @@ from .types import (
 )
 from .utils import (
     daily_window_sums,
+    utcnow,
     validate_output_path,
     validate_package_name,
 )
 
 # Delay in seconds between fetching each package to avoid hitting API rate limits
 _FETCH_DELAY_SECONDS = 1.0
+
+# Placeholder workflow name for a repository with no runs on the scanned
+# branch. One row per repository, so the registry and the report agree on how
+# many repositories a scan covered.
+CI_NO_RUNS_WORKFLOW = "-"
+
+# Repositories scanned concurrently by `ci`. The GitHub API tolerates this
+# comfortably; the bound exists so a 140-repo registry does not open 140 sockets.
+_CI_MAX_WORKERS = 8
 
 
 @dataclass
@@ -134,6 +172,56 @@ class SyncResult:
     already_tracked: list[str]
     not_on_remote: list[str]
     pruned: list[str]
+
+
+@dataclass
+class CIEntry:
+    """The latest known state of one workflow in one repository."""
+
+    repo_key: str
+    workflow_name: str
+    state: str
+    branch: str | None = None
+    run_id: int | None = None
+    run_url: str | None = None
+    run_started_at: str | None = None
+    first_failed_at: str | None = None
+
+    @property
+    def is_failure(self) -> bool:
+        return self.state == CI_STATE_FAIL
+
+    @property
+    def failing_days(self) -> int | None:
+        """Whole days since the current failing streak began."""
+        if not self.is_failure or not self.first_failed_at:
+            return None
+        try:
+            started = datetime.fromisoformat(self.first_failed_at.replace("Z", ""))
+        except ValueError:
+            return None
+        if started.tzinfo is not None:
+            started = started.replace(tzinfo=None)
+        return max((utcnow() - started).days, 0)
+
+
+@dataclass
+class CIResult:
+    """The CI scan of one repository."""
+
+    repo_key: str
+    entries: list[CIEntry]
+    packages: list[str]
+    branch: str | None = None
+    error: str | None = None
+
+    @property
+    def failures(self) -> list[CIEntry]:
+        return [e for e in self.entries if e.is_failure]
+
+    @property
+    def ok(self) -> bool:
+        return self.error is None and not self.failures
 
 
 class PackageStatsService:
@@ -728,6 +816,7 @@ class PackageStatsService:
         output_file: str,
         include_env: bool = False,
         include_github: bool = False,
+        include_ci: bool = False,
     ) -> bool:
         """Generate HTML report for all packages.
 
@@ -736,6 +825,9 @@ class PackageStatsService:
             include_env: If True, include Python/OS distribution summary.
             include_github: If True, include GitHub stats (stars, forks, etc.)
                 from cache. Packages without cached data are skipped.
+            include_ci: If True, scan registered repositories and include a CI
+                status section. Run listings are cached for an hour, so a repeat
+                report costs no requests.
 
         Returns:
             True if report was generated, False if no data available.
@@ -772,8 +864,18 @@ class PackageStatsService:
                     if result.success and result.stats is not None:
                         github_stats[pkg] = result.stats
 
+        ci_rows = None
+        if include_ci:
+            ci_rows = self.get_ci_rows(self.fetch_ci_status())
+
         generate_html_report(
-            stats, output_file, all_history, packages, env_summary, github_stats
+            stats,
+            output_file,
+            all_history,
+            packages,
+            env_summary,
+            github_stats,
+            ci_rows,
         )
         return True
 
@@ -1071,10 +1173,21 @@ class PackageStatsService:
                 # Record a daily snapshot so star/fork history accumulates.
                 if result.stats is not None:
                     s = result.stats
+                    repo_key = f"{s.owner}/{s.name}".lower()
+                    # Keep the scan registry current for free: a package that
+                    # resolves to a repo here never needs discovering.
+                    add_repo(
+                        conn,
+                        repo_key,
+                        source=REPO_SOURCE_PACKAGE,
+                        default_branch=s.default_branch,
+                        commit=False,
+                    )
+                    link_package_repo(conn, pkg, repo_key, commit=False)
                     store_github_stats_snapshot(
                         conn,
                         pkg,
-                        f"{s.owner}/{s.name}".lower(),
+                        repo_key,
                         s.stars,
                         s.forks,
                         s.open_issues,
@@ -1138,6 +1251,454 @@ class PackageStatsService:
         """
         with get_db(self.db_path) as conn:
             return get_github_cache_stats(conn)
+
+    # -------------------------------------------------------------------------
+    # Repository registry
+    # -------------------------------------------------------------------------
+
+    def list_repos(
+        self, enabled_only: bool = True, with_workflows_only: bool = False
+    ) -> list[dict[str, Any]]:
+        """List registered repositories, with their linked packages."""
+        with get_db(self.db_path) as conn:
+            repos = get_repos(
+                conn,
+                enabled_only=enabled_only,
+                with_workflows_only=with_workflows_only,
+            )
+            packages = get_repo_packages(conn)
+        for repo in repos:
+            repo["packages"] = packages.get(repo["repo_key"], [])
+        return repos
+
+    def add_repo(self, repo_key: str) -> bool:
+        """Register a repository by ``owner/name`` (or its GitHub URL)."""
+        with get_db(self.db_path) as conn:
+            return add_repo(conn, repo_key, source=REPO_SOURCE_MANUAL)
+
+    def remove_repo(self, repo_key: str) -> bool:
+        """Unregister a repository and drop its CI rows."""
+        with get_db(self.db_path) as conn:
+            return remove_repo(conn, repo_key)
+
+    def set_repo_enabled(self, repo_key: str, enabled: bool) -> bool:
+        """Include or exclude a repository from scans without forgetting it."""
+        with get_db(self.db_path) as conn:
+            return set_repo_enabled(conn, repo_key, enabled)
+
+    def seed_repos(self) -> int:
+        """Fill an empty registry from GitHub data already stored locally."""
+        with get_db(self.db_path) as conn:
+            return seed_repos_from_cache(conn)
+
+    def discover_repos(
+        self,
+        user: str,
+        include_forks: bool = False,
+        include_archived: bool = False,
+        probe_workflows: bool = True,
+    ) -> dict[str, Any]:
+        """Register a user's repositories, and link them to tracked packages.
+
+        Probing asks each new repository how many workflows it defines, which
+        is one request per repository but only on the run that first sees it --
+        the answer is stored. Pass ``probe_workflows=False`` to register
+        everything unprobed and let the scan find out.
+
+        Returns counts under ``found``, ``added``, ``with_workflows``, ``linked``
+        and the ``repos`` listing, or an ``error`` key when the listing failed.
+        """
+        listing = fetch_user_repos(
+            user,
+            include_forks=include_forks,
+            include_archived=include_archived,
+        )
+        if listing is None:
+            return {"error": f"Could not list repositories for '{user}'"}
+
+        known: dict[str, dict[str, Any]] = {}
+        with get_db(self.db_path) as conn:
+            for row in get_repos(conn, enabled_only=False):
+                known[row["repo_key"]] = row
+
+        # Probe only repositories whose workflow count is not already known.
+        to_probe = [
+            r["full_name"]
+            for r in listing
+            if probe_workflows
+            and known.get(normalize_repo_key(r["full_name"]), {}).get("has_workflows")
+            is None
+        ]
+        counts: dict[str, int | None] = {}
+        if to_probe:
+            with ThreadPoolExecutor(max_workers=_CI_MAX_WORKERS) as executor:
+                counts = dict(
+                    zip(to_probe, executor.map(self._probe_workflows, to_probe))
+                )
+
+        added = 0
+        with_workflows = 0
+        with get_db(self.db_path) as conn:
+            for repo in listing:
+                key = normalize_repo_key(repo["full_name"])
+                count = counts.get(repo["full_name"])
+                if count is None:
+                    count = known.get(key, {}).get("has_workflows")
+                if add_repo(
+                    conn,
+                    key,
+                    source=REPO_SOURCE_DISCOVER,
+                    has_workflows=count,
+                    default_branch=repo.get("default_branch"),
+                    commit=False,
+                ):
+                    added += 1
+                if count:
+                    with_workflows += 1
+            conn.commit()
+            linked = self._link_packages_by_name(conn)
+
+        return {
+            "found": len(listing),
+            "added": added,
+            "with_workflows": with_workflows,
+            "linked": linked,
+            "repos": [r["full_name"] for r in listing],
+        }
+
+    @staticmethod
+    def _probe_workflows(full_name: str) -> int | None:
+        owner, _, name = full_name.partition("/")
+        if not name:
+            return None
+        return fetch_workflow_count(owner, name)
+
+    @staticmethod
+    def _link_packages_by_name(conn: sqlite3.Connection) -> int:
+        """Link tracked packages to same-named repositories.
+
+        The package-to-repo lookup goes through PyPI metadata, so a package that
+        is unpublished, or published without a repository URL, resolves to
+        nothing. Matching on the normalized name recovers those, which on a
+        typical account is most of the gap.
+        """
+
+        def canonical(name: str) -> str:
+            return name.lower().replace("_", "-").replace(".", "-")
+
+        by_name = {
+            canonical(row["repo_key"].split("/", 1)[-1]): row["repo_key"]
+            for row in get_repos(conn, enabled_only=False)
+        }
+        linked_keys = {
+            (row["package_name"], row["repo_key"])
+            for row in conn.execute("SELECT package_name, repo_key FROM package_repos")
+        }
+        linked = 0
+        for row in conn.execute("SELECT package_name FROM packages"):
+            package = row["package_name"]
+            repo_key = by_name.get(canonical(package))
+            if repo_key and (package, repo_key) not in linked_keys:
+                link_package_repo(conn, package, repo_key, commit=False)
+                linked += 1
+        conn.commit()
+        return linked
+
+    # -------------------------------------------------------------------------
+    # CI status
+    # -------------------------------------------------------------------------
+
+    def fetch_ci_status(
+        self,
+        repos: list[str] | None = None,
+        branch: str | None = None,
+        use_cache: bool = True,
+        limit: int = CI_RUN_WINDOW,
+        ignore_workflows: list[str] | None = None,
+    ) -> list[CIResult]:
+        """Scan repositories for the latest run of each of their workflows.
+
+        Repositories come from the registry unless ``repos`` names them. With
+        ``branch`` unset each repository is scanned on its own default branch,
+        so a red run on someone's feature branch is not reported as broken CI.
+
+        Cache reads and all writes happen on this thread and only the network
+        calls are parallel, because a SQLite connection cannot cross threads.
+        """
+        ignore = ignore_workflows or []
+
+        with get_db(self.db_path) as conn:
+            if repos is None:
+                registry = get_repos(conn, enabled_only=True, with_workflows_only=True)
+                if not registry:
+                    seed_repos_from_cache(conn)
+                    registry = get_repos(
+                        conn, enabled_only=True, with_workflows_only=True
+                    )
+                targets = [
+                    (r["repo_key"], branch or r["default_branch"]) for r in registry
+                ]
+            else:
+                known = {
+                    r["repo_key"]: r["default_branch"]
+                    for r in get_repos(conn, enabled_only=False)
+                }
+                targets = []
+                for repo_key in repos:
+                    key = normalize_repo_key(repo_key)
+                    targets.append((key, branch or known.get(key)))
+
+            package_map = get_repo_packages(conn)
+
+            # Phase 1: serve what the cache already holds.
+            pending: list[tuple[str, str | None]] = []
+            raw_runs: dict[str, list[dict[str, Any]] | None] = {}
+            for repo_key, repo_branch in targets:
+                owner, _, name = repo_key.partition("/")
+                cached = (
+                    get_cached_workflow_runs(conn, owner, name, repo_branch)
+                    if use_cache and name
+                    else None
+                )
+                if cached is not None:
+                    raw_runs[repo_key] = cached
+                else:
+                    pending.append((repo_key, repo_branch))
+
+            # Phase 2: fetch the misses in parallel, network only.
+            fetched: list[tuple[str, str | None, list[dict[str, Any]] | None]] = []
+            if pending:
+                with ThreadPoolExecutor(max_workers=_CI_MAX_WORKERS) as executor:
+                    fetched = list(
+                        executor.map(
+                            lambda t: self._scan_repo(t[0], t[1], limit),
+                            pending,
+                        )
+                    )
+
+            # Phase 3: persist cache entries, branches and CI state.
+            branches = dict(targets)
+            for repo_key, resolved_branch, raw in fetched:
+                branches[repo_key] = resolved_branch
+                raw_runs[repo_key] = raw
+                owner, _, name = repo_key.partition("/")
+                if resolved_branch:
+                    add_repo(
+                        conn,
+                        repo_key,
+                        source=REPO_SOURCE_PACKAGE,
+                        default_branch=resolved_branch,
+                        commit=False,
+                    )
+                if use_cache and raw is not None and name:
+                    store_cached_workflow_runs(conn, owner, name, resolved_branch, raw)
+
+            results: list[CIResult] = []
+            for repo_key, _ in targets:
+                raw = raw_runs.get(repo_key)
+                repo_branch = branches.get(repo_key)
+                packages = package_map.get(repo_key, [])
+                if raw is None:
+                    results.append(
+                        CIResult(
+                            repo_key=repo_key,
+                            entries=[],
+                            packages=packages,
+                            branch=repo_branch,
+                            error="Could not fetch workflow runs",
+                        )
+                    )
+                    continue
+
+                entries: list[CIEntry] = []
+                for run in latest_run_per_workflow(parse_workflow_runs(raw)):
+                    if any(
+                        fnmatch.fnmatch(run.workflow_name, pattern)
+                        for pattern in ignore
+                    ):
+                        continue
+                    started = run.created_at.isoformat() if run.created_at else None
+                    first_failed = store_ci_status(
+                        conn,
+                        repo_key,
+                        run.workflow_name,
+                        run.state,
+                        branch=run.branch,
+                        run_id=run.run_id,
+                        run_url=run.url,
+                        run_started_at=started,
+                        commit=False,
+                    )
+                    entries.append(
+                        CIEntry(
+                            repo_key=repo_key,
+                            workflow_name=run.workflow_name,
+                            state=run.state,
+                            branch=run.branch,
+                            run_id=run.run_id,
+                            run_url=run.url,
+                            run_started_at=started,
+                            first_failed_at=first_failed,
+                        )
+                    )
+
+                if not entries:
+                    # Recorded, not just displayed: a repository with workflows
+                    # but no runs on this branch is a scan result, and leaving
+                    # it out would make the report count fewer repositories
+                    # than the scan reports.
+                    store_ci_status(
+                        conn,
+                        repo_key,
+                        CI_NO_RUNS_WORKFLOW,
+                        CI_STATE_NO_RUNS,
+                        branch=repo_branch,
+                        commit=False,
+                    )
+                    entries = [
+                        CIEntry(
+                            repo_key=repo_key,
+                            workflow_name=CI_NO_RUNS_WORKFLOW,
+                            state=CI_STATE_NO_RUNS,
+                            branch=repo_branch,
+                        )
+                    ]
+
+                # Forget workflows this scan did not see: renamed and deleted
+                # ones would otherwise keep reporting their last failure.
+                prune_ci_status(
+                    conn,
+                    repo_key,
+                    [e.workflow_name for e in entries],
+                    commit=False,
+                )
+                results.append(
+                    CIResult(
+                        repo_key=repo_key,
+                        entries=entries,
+                        packages=packages,
+                        branch=repo_branch,
+                    )
+                )
+            conn.commit()
+
+        return results
+
+    @staticmethod
+    def _scan_repo(
+        repo_key: str, branch: str | None, limit: int
+    ) -> tuple[str, str | None, list[dict[str, Any]] | None]:
+        """Network half of a repository scan. Runs off the main thread."""
+        owner, _, name = repo_key.partition("/")
+        if not name:
+            return repo_key, branch, None
+        if branch is None:
+            branch = fetch_default_branch(owner, name)
+        return (
+            repo_key,
+            branch,
+            fetch_workflow_runs_raw(owner, name, branch=branch, limit=limit),
+        )
+
+    def get_ci_rows(
+        self, results: list[CIResult] | None = None
+    ) -> list[dict[str, Any]]:
+        """Flatten CI state into report rows, failures first.
+
+        Reads the last scan from the database when ``results`` is not given, so
+        a report can render CI without touching the network.
+        """
+        if results is not None:
+            rows = [
+                {
+                    "repo_key": result.repo_key,
+                    "workflow_name": entry.workflow_name,
+                    "state": entry.state,
+                    "branch": entry.branch or result.branch,
+                    "run_url": entry.run_url,
+                    "run_started_at": entry.run_started_at,
+                    "first_failed_at": entry.first_failed_at,
+                    "failing_days": entry.failing_days,
+                    "packages": result.packages,
+                }
+                for result in results
+                for entry in result.entries
+            ]
+        else:
+            with get_db(self.db_path) as conn:
+                stored = get_ci_status(conn)
+                package_map = get_repo_packages(conn)
+            rows = []
+            for row in stored:
+                entry = CIEntry(
+                    repo_key=row["repo_key"],
+                    workflow_name=row["workflow_name"],
+                    state=row["state"],
+                    branch=row["branch"],
+                    run_url=row["run_url"],
+                    run_started_at=row["run_started_at"],
+                    first_failed_at=row["first_failed_at"],
+                )
+                rows.append(
+                    {
+                        "repo_key": entry.repo_key,
+                        "workflow_name": entry.workflow_name,
+                        "state": entry.state,
+                        "branch": entry.branch,
+                        "run_url": entry.run_url,
+                        "run_started_at": entry.run_started_at,
+                        "first_failed_at": entry.first_failed_at,
+                        "failing_days": entry.failing_days,
+                        "packages": package_map.get(entry.repo_key, []),
+                    }
+                )
+
+        def order(row: dict[str, Any]) -> tuple[bool, int, str, str]:
+            days = row["failing_days"]
+            return (
+                row["state"] != CI_STATE_FAIL,
+                -int(days) if days is not None else 0,
+                str(row["repo_key"]),
+                str(row["workflow_name"]),
+            )
+
+        rows.sort(key=order)
+        return rows
+
+    def generate_ci_report(
+        self,
+        output_file: str,
+        scan: bool = True,
+        show_all: bool = False,
+        branch: str | None = None,
+        use_cache: bool = True,
+    ) -> bool:
+        """Write a standalone CI status report.
+
+        Scans first unless ``scan`` is False, in which case the last recorded
+        state is rendered without any request.
+
+        Raises:
+            ValueError: If the output path is invalid or not writable.
+        """
+        is_valid, error_msg = validate_output_path(
+            output_file, allowed_extensions=[".html", ".htm"]
+        )
+        if not is_valid:
+            raise ValueError(error_msg)
+
+        results = (
+            self.fetch_ci_status(branch=branch, use_cache=use_cache) if scan else None
+        )
+        generate_ci_html_report(
+            self.get_ci_rows(results), output_file, show_all=show_all
+        )
+        return True
+
+    def get_ci_status(self, repo_key: str | None = None) -> list[dict[str, Any]]:
+        """Return the CI state recorded by the last scan, without fetching."""
+        with get_db(self.db_path) as conn:
+            return get_ci_status(conn, repo_key)
 
     # -------------------------------------------------------------------------
     # Maintenance

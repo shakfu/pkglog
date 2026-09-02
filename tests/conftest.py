@@ -167,6 +167,37 @@ def in_timezone(request):
     time.tzset()
 
 
+@pytest.fixture(autouse=True)
+def no_gh_cli_token(monkeypatch):
+    """Keep the developer's `gh` login out of the tests.
+
+    get_github_token() falls back to `gh auth token`, so on an authenticated
+    machine every request would silently carry a real credential and the
+    no-token tests would fail. Making the subprocess unavailable leaves the
+    real code path in place for the tests that exercise it, which re-patch
+    `subprocess.run` themselves. The once-per-process resolution cache is
+    cleared either side so a lookup cannot leak between tests.
+    """
+    import pkgdb.github as gh
+
+    monkeypatch.setattr(gh.subprocess, "run", _no_subprocess)
+    gh._gh_cli_token_resolved = False
+    gh._gh_cli_token_cached = None
+    # The no-token and rate-limit warnings fire once per process, so a test
+    # asserting on either needs them cleared rather than already spent.
+    gh._warned_unauthenticated = False
+    gh._warned_rate_limited = False
+    yield
+    gh._gh_cli_token_resolved = False
+    gh._gh_cli_token_cached = None
+    gh._warned_unauthenticated = False
+    gh._warned_rate_limited = False
+
+
+def _no_subprocess(*args, **kwargs):
+    raise FileNotFoundError("subprocess is unavailable in tests")
+
+
 @pytest.fixture
 def temp_db():
     """Create a temporary database file."""
@@ -179,9 +210,7 @@ def temp_db():
 @pytest.fixture
 def temp_packages_file():
     """Create a temporary packages.json file."""
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump({"published": ["package-a", "package-b"]}, f)
         packages_path = f.name
     yield packages_path

@@ -30,7 +30,9 @@ class TestBadgeGeneration:
 
     def test_generate_badge_svg_custom_colors(self):
         """generate_badge_svg should accept custom colors."""
-        svg = generate_badge_svg("test", "value", color="#ff0000", label_color="#00ff00")
+        svg = generate_badge_svg(
+            "test", "value", color="#ff0000", label_color="#00ff00"
+        )
 
         assert "#ff0000" in svg
         assert "#00ff00" in svg
@@ -134,7 +136,9 @@ class TestBadgeGeneration:
         assert args.package == "test-pkg"
         assert args.period == "total"
 
-        args = parser.parse_args(["badge", "test-pkg", "-p", "month", "-o", "badge.svg"])
+        args = parser.parse_args(
+            ["badge", "test-pkg", "-p", "month", "-o", "badge.svg"]
+        )
         assert args.period == "month"
         assert args.output == "badge.svg"
 

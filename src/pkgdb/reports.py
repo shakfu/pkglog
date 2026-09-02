@@ -1,5 +1,6 @@
 """HTML report generation with SVG charts."""
 
+import html
 import logging
 import math
 from datetime import datetime
@@ -8,6 +9,8 @@ from typing import Any
 from .api import fetch_os_stats, fetch_python_versions
 from .github import RepoStats
 from .types import (
+    CI_STATE_FAIL,
+    CI_STATE_PASS,
     CategoryDownloads,
     DailyDownload,
     EnvSummary,
@@ -133,6 +136,28 @@ def _get_common_styles() -> str:
         }}
         a {{
             color: {THEME_PRIMARY_COLOR};
+        }}
+        .ci-state {{
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 12px;
+            font-weight: bold;
+            color: white;
+        }}
+        .ci-fail {{
+            background: #c0392b;
+        }}
+        .ci-pass {{
+            background: #27ae60;
+        }}
+        .ci-other {{
+            background: #7f8c8d;
+        }}
+        .ci-note {{
+            color: #666;
+            font-size: 0.9em;
         }}
     """
 
@@ -560,6 +585,112 @@ def _format_growth(value: float | None) -> str:
     return f'<span style="color: {color}">{arrow} {sign}{value:.1f}%</span>'
 
 
+# -----------------------------------------------------------------------------
+# CI Status
+# -----------------------------------------------------------------------------
+
+
+def _ci_state_badge(state: str) -> str:
+    """Render a CI state as a coloured badge."""
+    if state == CI_STATE_FAIL:
+        css = "ci-fail"
+    elif state == CI_STATE_PASS:
+        css = "ci-pass"
+    else:
+        css = "ci-other"
+    return f'<span class="ci-state {css}">{html.escape(state)}</span>'
+
+
+def build_ci_section(ci_status: list[dict[str, Any]], show_all: bool = False) -> str:
+    """Render the CI status table.
+
+    Failing workflows only unless ``show_all``. Workflow names come from
+    arbitrary repository YAML, so every cell is escaped.
+
+    Expects the row shape produced by ``PackageStatsService.get_ci_rows()``.
+    """
+    if not ci_status:
+        return """
+    <div class="chart-container">
+        <h2>CI Status</h2>
+        <p class="ci-note">No CI scan recorded. Register repositories with
+        <code>pkgdb repo discover --user &lt;name&gt;</code>, then run
+        <code>pkgdb ci</code>.</p>
+    </div>
+"""
+
+    rows = [r for r in ci_status if show_all or r.get("state") == CI_STATE_FAIL]
+    repos = len({r["repo_key"] for r in ci_status})
+    failing_repos = len(
+        {r["repo_key"] for r in ci_status if r.get("state") == CI_STATE_FAIL}
+    )
+
+    if not rows:
+        return f"""
+    <div class="chart-container">
+        <h2>CI Status</h2>
+        <p class="ci-note">All {repos} repositories are green.</p>
+    </div>
+"""
+
+    table_rows = ""
+    for r in rows:
+        repo = html.escape(str(r["repo_key"]))
+        run_url = r.get("run_url")
+        run_cell = f'<a href="{html.escape(str(run_url))}">run</a>' if run_url else "-"
+        failing = r.get("failing_days")
+        packages = ", ".join(r.get("packages") or []) or "-"
+        table_rows += f"""            <tr>
+                <td><a href="https://github.com/{repo}">{repo}</a></td>
+                <td>{html.escape(str(r.get("workflow_name") or "-"))}</td>
+                <td>{_ci_state_badge(str(r.get("state") or "-"))}</td>
+                <td>{html.escape(str(r.get("branch") or "-"))}</td>
+                <td class="number">{f"{failing}d" if failing is not None else "-"}</td>
+                <td>{html.escape(packages)}</td>
+                <td>{run_cell}</td>
+            </tr>
+"""
+
+    summary = (
+        f"{failing_repos} of {repos} repositories have failing workflows."
+        if failing_repos
+        else f"All {repos} repositories are green."
+    )
+    return f"""
+    <div class="chart-container">
+        <h2>CI Status</h2>
+        <p class="ci-note">{summary}</p>
+        <table>
+            <thead>
+                <tr>
+                    <th>Repository</th>
+                    <th>Workflow</th>
+                    <th>State</th>
+                    <th>Branch</th>
+                    <th class="number" title="Days since this failure began">
+                        Failing</th>
+                    <th>Packages</th>
+                    <th>Run</th>
+                </tr>
+            </thead>
+            <tbody>
+{table_rows}            </tbody>
+        </table>
+    </div>
+"""
+
+
+def generate_ci_html_report(
+    ci_status: list[dict[str, Any]], output_file: str, show_all: bool = False
+) -> None:
+    """Write a standalone CI status report."""
+    body = f"""    <h1>CI Status</h1>
+{build_ci_section(ci_status, show_all=show_all)}"""
+    with open(output_file, "w") as f:
+        f.write(_render_html_document("CI Status", body))
+    logger.info("CI report generated: %s", output_file)
+
+
 def generate_html_report(
     stats: list[dict[str, Any]],
     output_file: str,
@@ -567,6 +698,7 @@ def generate_html_report(
     packages: list[str] | None = None,
     env_summary: EnvSummary | None = None,
     github_stats: dict[str, RepoStats] | None = None,
+    ci_status: list[dict[str, Any]] | None = None,
 ) -> None:
     """Generate a self-contained HTML report with inline SVG charts.
 
@@ -577,6 +709,7 @@ def generate_html_report(
         packages: List of package names (unused, kept for compatibility)
         env_summary: Pre-fetched Python version and OS summary data
         github_stats: Dict mapping package names to RepoStats (optional)
+        ci_status: CI rows from PackageStatsService.get_ci_rows() (optional)
     """
     if not stats:
         logger.warning("No statistics available to generate report.")
@@ -693,6 +826,8 @@ def generate_html_report(
         else ""
     )
 
+    ci_section = build_ci_section(ci_status) if ci_status is not None else ""
+
     # Build body content
     body_content = f"""    <h1>PyPI Package Download Statistics</h1>
 
@@ -714,6 +849,8 @@ def generate_html_report(
     {f'<div class="chart-container"><h2>Downloads Over Time (Top 5)</h2>{time_series_chart}</div>' if time_series_chart else ""}
 
     {env_summary_html}
+
+    {ci_section}
 
     <h2>Detailed Statistics</h2>
     <table>

@@ -6,6 +6,58 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `pkgdb ci` - report the latest run of every GitHub Actions workflow across your repositories
+
+  - Failing workflows only unless `--all`, and exits 1 when any is failing, so it composes with shell and CI notifiers the way `check` does. `--repo owner/name` scans one repository without registering it; `--branch`, `--json`, `--no-cache`, `--exit-zero` and `-o` (write an HTML report) round it out
+
+  - Each repository is scanned on its own default branch, looked up once and stored. Reporting every branch makes a red run on someone's feature branch indistinguishable from broken CI
+
+  - `github_ci_status` records the latest state per `(repo, workflow)` with a `first_failed_at` streak start - the one value a scan cannot recompute from the API, and what separates a break from twenty minutes ago from one that has stood for months. It survives cancelled and in-progress runs, neither of which says the failure is over, and clears only on a pass. Runs are grouped by `workflow_id` rather than name, because a workflow setting `run-name` reports a different name per run
+
+- `pkgdb repo` and a repository registry (`github_repos`, `package_repos`), populated by `repo discover --user <name>`, `repo add`, and every `github fetch`
+
+  - Repositories were previously reachable only by resolving a tracked package through its PyPI metadata, which covers just the projects published to PyPI with a repository URL recorded. On the author's account that reached 28 of the 64 repositories that run CI
+
+  - `discover` records each repository's workflow count so later scans skip the ones with no CI, probing only repositories it has not seen before. Your own account is listed through `/user/repos`, because `/users/{user}/repos` returns public repositories only even with a token. It also links tracked packages to same-named repositories, recovering those whose PyPI metadata carries no repository URL: 41 of 46 packages linked, against 31 through the PyPI path alone
+
+  - A first `pkgdb ci` with an empty registry seeds it from the repository keys previous GitHub fetches left in `github_cache` and `github_stats_history`, without a network call
+
+- CI status in the HTML report and the dashboard
+
+  - `pkgdb ci -o [PATH]` writes a standalone report (default `~/.pkgdb/ci-report.html`); `report --ci` and `update --ci` add the same section to the main report. Both render from the recorded scan, so a report can be regenerated without touching GitHub. Workflow names come from arbitrary repository YAML and are escaped
+
+  - `serve` gains an `/api/ci` endpoint and an overview panel of failing workflows. It renders the last recorded scan and never starts one, because a cold scan takes seconds and the page must not block on it. The panel stays hidden until a scan exists rather than prompting for one
+
+- `[github] user` and `[ci] branch` / `[ci] ignore_workflows` config keys
+
+- Run listings are cached in `github_cache` under a per-branch key, expiring after one hour rather than the 24h used for repository metadata, because CI state changes on every push. On a 64-repository account a cold scan takes about 11 seconds and a repeat scan about 0.2
+
+### Fixed
+
+- An exhausted GitHub rate limit is no longer retried. A 403 carrying `x-ratelimit-remaining: 0` means the quota is gone until the reset, up to an hour away, so the backoff was sleeping through a wait it could not outlast - once per repository, over the whole registry. Permission errors and secondary limits, which lack that header, still retry as before
+
+- Running without a token now says so, once per process: `pkgdb ci` unauthenticated runs out of quota partway through any real account and reports the repositories it could not reach as unknown, which looked like a GitHub fault rather than a missing credential. Exhaustion is reported the same way, with its reset time
+
+- A workflow that is renamed or deleted no longer keeps reporting its last failure. Rows are keyed by workflow name, so a rename left the old row in place and the report showed a failure for a workflow that no longer exists. Each successful repository scan now drops the rows it did not see; a failed fetch prunes nothing, because unreachable is unknown rather than empty
+
+- A repository with workflows but no runs on the scanned branch is recorded rather than only displayed. It produced no row, so the scan and the report disagreed on how many repositories were covered - 64 against 55 on the author's account. Such repositories now store a single `NO_RUNS` row under the workflow name `-`
+
+### Changed
+
+- `get_github_token()` falls back to the token an authenticated `gh` CLI already holds, after `GITHUB_TOKEN` and `GH_TOKEN`
+
+  - Unauthenticated GitHub allows 60 requests an hour, which one `pkgdb ci` pass over a 64-repository account exhausts, so authentication is effectively mandatory for the new commands. Requiring a hand-made token to reach what `gh` is already logged in for is friction with no security benefit
+
+  - Resolved once per process with a 10-second timeout, querying `--hostname github.com` explicitly so a GitHub Enterprise default host does not answer. Neither the token nor gh's stderr is logged, and `gh` stays optional: absent or logged out, the lookup returns nothing
+
+### Removed
+
+- `scripts/wflw-scan.sh`, replaced by `pkgdb ci`
+
+  - The script derived its repository set from `github_cache`, which is expiring cache state rather than a record of what you own: `pkgdb github clear --all` left it scanning nothing, and the suffixed keys written for the issues-only count would have been passed to `gh run list` as repository names. It also required `gh` and `jq`, reported passing workflows on every branch, always exited 0, and kept no state, so a workflow broken for a month looked like one broken this morning
+
 ## [0.2.3]
 
 ### Added

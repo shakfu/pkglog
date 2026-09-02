@@ -270,15 +270,31 @@ class TestApiEndpoints:
         from pkgdb.db import store_daily_downloads
 
         with get_db(populated_db) as conn:
-            store_daily_downloads(conn, "alpha-pkg", [
-                {"date": "2026-06-01", "dimension": "overall",
-                 "category": "without_mirrors", "downloads": 10},
-                {"date": "2026-06-02", "dimension": "overall",
-                 "category": "without_mirrors", "downloads": 20},
-                # A python-dimension row must NOT appear in the overall series
-                {"date": "2026-06-01", "dimension": "python",
-                 "category": "3.12", "downloads": 5},
-            ])
+            store_daily_downloads(
+                conn,
+                "alpha-pkg",
+                [
+                    {
+                        "date": "2026-06-01",
+                        "dimension": "overall",
+                        "category": "without_mirrors",
+                        "downloads": 10,
+                    },
+                    {
+                        "date": "2026-06-02",
+                        "dimension": "overall",
+                        "category": "without_mirrors",
+                        "downloads": 20,
+                    },
+                    # A python-dimension row must NOT appear in the overall series
+                    {
+                        "date": "2026-06-01",
+                        "dimension": "python",
+                        "category": "3.12",
+                        "downloads": 5,
+                    },
+                ],
+            )
         resp = urlopen(f"{server_url}/api/daily/alpha-pkg")
         assert resp.status == 200
         data = json.loads(resp.read())
@@ -314,6 +330,32 @@ class TestApiEndpoints:
         resp = urlopen(f"{server_url}/api/github-history/nonexistent-pkg")
         assert json.loads(resp.read()) == []
 
+    def test_api_ci_empty_before_any_scan(self, server_url):
+        resp = urlopen(f"{server_url}/api/ci")
+        assert resp.status == 200
+        assert json.loads(resp.read()) == []
+
+    def test_api_ci_returns_recorded_state(self, populated_db, server_url):
+        from pkgdb.db import add_repo, link_package_repo, store_ci_status
+
+        with get_db(populated_db) as conn:
+            add_repo(conn, "o/r")
+            link_package_repo(conn, "alpha-pkg", "o/r")
+            store_ci_status(
+                conn,
+                "o/r",
+                "build",
+                "FAIL",
+                branch="main",
+                run_url="https://github.com/o/r/actions/runs/1",
+                run_started_at="2026-08-01T00:00:00",
+            )
+        resp = urlopen(f"{server_url}/api/ci")
+        data = json.loads(resp.read())
+        assert data[0]["repo_key"] == "o/r"
+        assert data[0]["state"] == "FAIL"
+        assert data[0]["packages"] == ["alpha-pkg"]
+
     def test_api_env(self, server_url):
         resp = urlopen(f"{server_url}/api/env/alpha-pkg")
         assert resp.status == 200
@@ -332,8 +374,10 @@ class TestApiEndpoints:
 
     def test_api_releases(self, server_url):
         # alpha-pkg has no cached releases, so patch the live lookups
-        with patch("pkgdb.service.fetch_pypi_releases", return_value=None), \
-             patch("pkgdb.service.extract_github_url", return_value=None):
+        with (
+            patch("pkgdb.service.fetch_pypi_releases", return_value=None),
+            patch("pkgdb.service.extract_github_url", return_value=None),
+        ):
             resp = urlopen(f"{server_url}/api/releases/alpha-pkg")
         assert resp.status == 200
         data = json.loads(resp.read())
@@ -356,15 +400,19 @@ class TestServerLifecycle:
 
     def test_start_server_opens_browser(self, populated_db):
         """start_server should call webbrowser.open when open_browser=True."""
-        with patch("pkgdb.server.webbrowser.open_new_tab") as mock_open, \
-             patch.object(HTTPServer, "serve_forever", side_effect=KeyboardInterrupt):
+        with (
+            patch("pkgdb.server.webbrowser.open_new_tab") as mock_open,
+            patch.object(HTTPServer, "serve_forever", side_effect=KeyboardInterrupt),
+        ):
             start_server(populated_db, port=0, open_browser=True)
             mock_open.assert_called_once()
 
     def test_start_server_no_browser(self, populated_db):
         """start_server should not open browser when open_browser=False."""
-        with patch("pkgdb.server.webbrowser.open_new_tab") as mock_open, \
-             patch.object(HTTPServer, "serve_forever", side_effect=KeyboardInterrupt):
+        with (
+            patch("pkgdb.server.webbrowser.open_new_tab") as mock_open,
+            patch.object(HTTPServer, "serve_forever", side_effect=KeyboardInterrupt),
+        ):
             start_server(populated_db, port=0, open_browser=False)
             mock_open.assert_not_called()
 
@@ -373,8 +421,10 @@ class TestServerLifecycle:
         # Simulate address-in-use by making HTTPServer constructor raise
         err = OSError("Address already in use")
         err.errno = 48
-        with patch("pkgdb.server.HTTPServer", side_effect=err), \
-             patch("pkgdb.server.logger") as mock_logger:
+        with (
+            patch("pkgdb.server.HTTPServer", side_effect=err),
+            patch("pkgdb.server.logger") as mock_logger,
+        ):
             start_server(populated_db, port=9999, open_browser=False)
             mock_logger.error.assert_called_once()
             assert "already in use" in mock_logger.error.call_args[0][0]
@@ -393,9 +443,7 @@ class TestServeCli:
         import argparse
         from pkgdb.cli import cmd_serve
 
-        args = argparse.Namespace(
-            database=populated_db, port=9999, no_browser=True
-        )
+        args = argparse.Namespace(database=populated_db, port=9999, no_browser=True)
 
         with patch("pkgdb.server.start_server") as mock_start:
             cmd_serve(args)

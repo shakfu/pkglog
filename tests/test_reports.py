@@ -37,9 +37,7 @@ class TestHTMLReportGeneration:
             }
         ]
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".html", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
             output_path = f.name
 
         try:
@@ -57,13 +55,23 @@ class TestHTMLReportGeneration:
     def test_generate_html_report_includes_all_packages(self):
         """generate_html_report should include all packages in the report."""
         stats = [
-            {"package_name": "pkg-a", "total": 1000, "last_month": 300, "last_week": 70, "last_day": 10},
-            {"package_name": "pkg-b", "total": 500, "last_month": 150, "last_week": 35, "last_day": 5},
+            {
+                "package_name": "pkg-a",
+                "total": 1000,
+                "last_month": 300,
+                "last_week": 70,
+                "last_day": 10,
+            },
+            {
+                "package_name": "pkg-b",
+                "total": 500,
+                "last_month": 150,
+                "last_week": 35,
+                "last_day": 5,
+            },
         ]
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".html", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
             output_path = f.name
 
         try:
@@ -76,9 +84,7 @@ class TestHTMLReportGeneration:
 
     def test_generate_html_report_empty_stats(self, caplog):
         """generate_html_report should handle empty stats gracefully."""
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".html", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
             output_path = f.name
 
         try:
@@ -90,19 +96,44 @@ class TestHTMLReportGeneration:
     def test_generate_html_report_with_history(self):
         """generate_html_report should include time-series chart when history provided."""
         stats = [
-            {"package_name": "pkg-a", "total": 3000, "last_month": 900, "last_week": 210, "last_day": 30},
+            {
+                "package_name": "pkg-a",
+                "total": 3000,
+                "last_month": 900,
+                "last_week": 210,
+                "last_day": 30,
+            },
         ]
         history = {
             "pkg-a": [
-                {"package_name": "pkg-a", "fetch_date": "2024-01-01", "total": 1000, "last_month": 300, "last_week": 70, "last_day": 10},
-                {"package_name": "pkg-a", "fetch_date": "2024-01-02", "total": 2000, "last_month": 600, "last_week": 140, "last_day": 20},
-                {"package_name": "pkg-a", "fetch_date": "2024-01-03", "total": 3000, "last_month": 900, "last_week": 210, "last_day": 30},
+                {
+                    "package_name": "pkg-a",
+                    "fetch_date": "2024-01-01",
+                    "total": 1000,
+                    "last_month": 300,
+                    "last_week": 70,
+                    "last_day": 10,
+                },
+                {
+                    "package_name": "pkg-a",
+                    "fetch_date": "2024-01-02",
+                    "total": 2000,
+                    "last_month": 600,
+                    "last_week": 140,
+                    "last_day": 20,
+                },
+                {
+                    "package_name": "pkg-a",
+                    "fetch_date": "2024-01-03",
+                    "total": 3000,
+                    "last_month": 900,
+                    "last_week": 210,
+                    "last_day": 30,
+                },
             ]
         }
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".html", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
             output_path = f.name
 
         try:
@@ -128,9 +159,7 @@ class TestHTMLReportGeneration:
             }
         ]
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".html", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
             output_path = f.name
 
         try:
@@ -155,9 +184,7 @@ class TestHTMLReportGeneration:
             }
         ]
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".html", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
             output_path = f.name
 
         try:
@@ -206,8 +233,14 @@ class TestPieChart:
     def test_make_svg_pie_chart_groups_others(self):
         """make_svg_pie_chart should group items beyond top 5 as 'Other'."""
         data = [
-            ("A", 100), ("B", 90), ("C", 80), ("D", 70), ("E", 60),
-            ("F", 50), ("G", 40), ("H", 30),
+            ("A", 100),
+            ("B", 90),
+            ("C", 80),
+            ("D", 70),
+            ("E", 60),
+            ("F", 50),
+            ("G", 40),
+            ("H", 30),
         ]
         svg = make_svg_pie_chart(data, "test-chart")
 
@@ -224,20 +257,20 @@ class TestPackageHTMLReport:
         """generate_package_html_report should create HTML file."""
         stats = {"total": 1000, "last_month": 300, "last_week": 70, "last_day": 10}
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".html", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
             output_path = f.name
 
-        python_response = json.dumps({
-            "data": [{"category": "3.11", "downloads": 2000}]
-        })
-        system_response = json.dumps({
-            "data": [{"category": "Linux", "downloads": 4000}]
-        })
+        python_response = json.dumps(
+            {"data": [{"category": "3.11", "downloads": 2000}]}
+        )
+        system_response = json.dumps(
+            {"data": [{"category": "Linux", "downloads": 4000}]}
+        )
 
         try:
-            with patch("pkgdb.api.pypistats.python_minor", return_value=python_response):
+            with patch(
+                "pkgdb.api.pypistats.python_minor", return_value=python_response
+            ):
                 with patch("pkgdb.api.pypistats.system", return_value=system_response):
                     generate_package_html_report("test-pkg", output_path, stats=stats)
 
@@ -252,16 +285,16 @@ class TestPackageHTMLReport:
         """generate_package_html_report should include download stat cards."""
         stats = {"total": 1000, "last_month": 300, "last_week": 70, "last_day": 10}
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".html", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
             output_path = f.name
 
         python_response = json.dumps({"data": []})
         system_response = json.dumps({"data": []})
 
         try:
-            with patch("pkgdb.api.pypistats.python_minor", return_value=python_response):
+            with patch(
+                "pkgdb.api.pypistats.python_minor", return_value=python_response
+            ):
                 with patch("pkgdb.api.pypistats.system", return_value=system_response):
                     generate_package_html_report("test-pkg", output_path, stats=stats)
 
@@ -278,26 +311,30 @@ class TestPackageHTMLReport:
         """generate_package_html_report should include environment pie charts."""
         stats = {"total": 1000, "last_month": 300, "last_week": 70, "last_day": 10}
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".html", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
             output_path = f.name
 
-        python_response = json.dumps({
-            "data": [
-                {"category": "3.11", "downloads": 2000},
-                {"category": "3.10", "downloads": 1000},
-            ]
-        })
-        system_response = json.dumps({
-            "data": [
-                {"category": "Linux", "downloads": 4000},
-                {"category": "Windows", "downloads": 1000},
-            ]
-        })
+        python_response = json.dumps(
+            {
+                "data": [
+                    {"category": "3.11", "downloads": 2000},
+                    {"category": "3.10", "downloads": 1000},
+                ]
+            }
+        )
+        system_response = json.dumps(
+            {
+                "data": [
+                    {"category": "Linux", "downloads": 4000},
+                    {"category": "Windows", "downloads": 1000},
+                ]
+            }
+        )
 
         try:
-            with patch("pkgdb.api.pypistats.python_minor", return_value=python_response):
+            with patch(
+                "pkgdb.api.pypistats.python_minor", return_value=python_response
+            ):
                 with patch("pkgdb.api.pypistats.system", return_value=system_response):
                     generate_package_html_report("test-pkg", output_path, stats=stats)
 
@@ -312,23 +349,46 @@ class TestPackageHTMLReport:
         """generate_package_html_report should include history chart when available."""
         stats = {"total": 3000, "last_month": 900, "last_week": 210, "last_day": 30}
         history = [
-            {"package_name": "test-pkg", "fetch_date": "2024-01-01", "total": 1000, "last_month": 300, "last_week": 70, "last_day": 10},
-            {"package_name": "test-pkg", "fetch_date": "2024-01-02", "total": 2000, "last_month": 600, "last_week": 140, "last_day": 20},
-            {"package_name": "test-pkg", "fetch_date": "2024-01-03", "total": 3000, "last_month": 900, "last_week": 210, "last_day": 30},
+            {
+                "package_name": "test-pkg",
+                "fetch_date": "2024-01-01",
+                "total": 1000,
+                "last_month": 300,
+                "last_week": 70,
+                "last_day": 10,
+            },
+            {
+                "package_name": "test-pkg",
+                "fetch_date": "2024-01-02",
+                "total": 2000,
+                "last_month": 600,
+                "last_week": 140,
+                "last_day": 20,
+            },
+            {
+                "package_name": "test-pkg",
+                "fetch_date": "2024-01-03",
+                "total": 3000,
+                "last_month": 900,
+                "last_week": 210,
+                "last_day": 30,
+            },
         ]
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".html", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
             output_path = f.name
 
         python_response = json.dumps({"data": []})
         system_response = json.dumps({"data": []})
 
         try:
-            with patch("pkgdb.api.pypistats.python_minor", return_value=python_response):
+            with patch(
+                "pkgdb.api.pypistats.python_minor", return_value=python_response
+            ):
                 with patch("pkgdb.api.pypistats.system", return_value=system_response):
-                    generate_package_html_report("test-pkg", output_path, stats=stats, history=history)
+                    generate_package_html_report(
+                        "test-pkg", output_path, stats=stats, history=history
+                    )
 
             content = Path(output_path).read_text()
             assert "Downloads Over Time" in content
@@ -343,8 +403,12 @@ class TestChartEdgeCases:
     def test_pie_chart_exactly_six_items(self):
         """Pie chart with exactly PIE_CHART_MAX_ITEMS should not group into Other."""
         data = [
-            ("A", 100), ("B", 90), ("C", 80),
-            ("D", 70), ("E", 60), ("F", 50),
+            ("A", 100),
+            ("B", 90),
+            ("C", 80),
+            ("D", 70),
+            ("E", 60),
+            ("F", 50),
         ]
         svg = make_svg_pie_chart(data, "test-chart")
 
@@ -360,8 +424,13 @@ class TestChartEdgeCases:
     def test_pie_chart_seven_items_groups_other(self):
         """Pie chart with 7 items should group last items into Other."""
         data = [
-            ("A", 100), ("B", 90), ("C", 80),
-            ("D", 70), ("E", 60), ("F", 50), ("G", 40),
+            ("A", 100),
+            ("B", 90),
+            ("C", 80),
+            ("D", 70),
+            ("E", 60),
+            ("F", 50),
+            ("G", 40),
         ]
         svg = make_svg_pie_chart(data, "test-chart")
 
@@ -438,7 +507,7 @@ class TestChartEdgeCases:
 
         data = [
             ("huge-pkg", 1_000_000_000),  # 1 billion
-            ("big-pkg", 100_000_000),     # 100 million
+            ("big-pkg", 100_000_000),  # 100 million
         ]
         svg = _make_svg_bar_chart(data, "Downloads", "test-chart")
 
@@ -489,9 +558,7 @@ class TestChartEdgeCases:
         """Multi-line chart with single date should show message."""
         from pkgdb.reports import _make_multi_line_chart
 
-        history = {
-            "pkg-a": [{"fetch_date": "2024-01-01", "total": 1000}]
-        }
+        history = {"pkg-a": [{"fetch_date": "2024-01-01", "total": 1000}]}
         svg = _make_multi_line_chart(history, "test-chart")
 
         assert "Not enough" in svg
@@ -503,16 +570,20 @@ class TestGithubInReport:
     def test_report_includes_github_columns(self, temp_db):
         from pkgdb.reports import generate_html_report
 
-        stats = [{
-            "package_name": "test-pkg",
-            "total": 50000,
-            "last_month": 3000,
-            "last_week": 700,
-            "last_day": 100,
-        }]
+        stats = [
+            {
+                "package_name": "test-pkg",
+                "total": 50000,
+                "last_month": 3000,
+                "last_week": 700,
+                "last_day": 100,
+            }
+        ]
         gh_stats = {
             "test-pkg": _make_repo_stats(
-                stars=42, forks=5, language="Python",
+                stars=42,
+                forks=5,
+                language="Python",
                 full_name="owner/test-pkg",
             ),
         }
@@ -534,13 +605,15 @@ class TestGithubInReport:
     def test_report_without_github_has_no_github_columns(self, temp_db):
         from pkgdb.reports import generate_html_report
 
-        stats = [{
-            "package_name": "test-pkg",
-            "total": 50000,
-            "last_month": 3000,
-            "last_week": 700,
-            "last_day": 100,
-        }]
+        stats = [
+            {
+                "package_name": "test-pkg",
+                "total": 50000,
+                "last_month": 3000,
+                "last_week": 700,
+                "last_day": 100,
+            }
+        ]
         output = os.path.join(os.path.dirname(temp_db), "test_report.html")
         generate_html_report(stats, output)
 
@@ -588,13 +661,15 @@ class TestGithubInReport:
         """The GitHub columns should carry each repo's open issue count."""
         from pkgdb.reports import generate_html_report
 
-        stats = [{
-            "package_name": "test-pkg",
-            "total": 50000,
-            "last_month": 3000,
-            "last_week": 700,
-            "last_day": 100,
-        }]
+        stats = [
+            {
+                "package_name": "test-pkg",
+                "total": 50000,
+                "last_month": 3000,
+                "last_week": 700,
+                "last_day": 100,
+            }
+        ]
         gh_stats = {
             "test-pkg": _make_repo_stats(
                 full_name="owner/test-pkg",
@@ -610,9 +685,7 @@ class TestGithubInReport:
 
         assert "Open Issues" in html
         # The issues-only count, not GitHub's PR-inclusive open_issues.
-        assert (
-            '<a href="https://github.com/owner/test-pkg/issues">17</a>' in html
-        )
+        assert '<a href="https://github.com/owner/test-pkg/issues">17</a>' in html
         assert ">25<" not in html
         Path(output).unlink(missing_ok=True)
 
@@ -620,13 +693,15 @@ class TestGithubInReport:
         """Without an issues-only count the cell is unknown, not zero."""
         from pkgdb.reports import generate_html_report
 
-        stats = [{
-            "package_name": "test-pkg",
-            "total": 50000,
-            "last_month": 3000,
-            "last_week": 700,
-            "last_day": 100,
-        }]
+        stats = [
+            {
+                "package_name": "test-pkg",
+                "total": 50000,
+                "last_month": 3000,
+                "last_week": 700,
+                "last_day": 100,
+            }
+        ]
         gh_stats = {
             "test-pkg": _make_repo_stats(
                 full_name="owner/test-pkg",
@@ -686,13 +761,15 @@ class TestGithubInReport:
         """The project name should hyperlink to its git repo when known."""
         from pkgdb.reports import generate_html_report
 
-        stats = [{
-            "package_name": "test-pkg",
-            "total": 50000,
-            "last_month": 3000,
-            "last_week": 700,
-            "last_day": 100,
-        }]
+        stats = [
+            {
+                "package_name": "test-pkg",
+                "total": 50000,
+                "last_month": 3000,
+                "last_week": 700,
+                "last_day": 100,
+            }
+        ]
         gh_stats = {
             "test-pkg": _make_repo_stats(full_name="owner/test-pkg"),
         }
@@ -747,10 +824,22 @@ class TestProjectReport:
         """generate_project_html_report should produce valid HTML."""
         stats = {"total": 50000, "last_month": 3000, "last_week": 700, "last_day": 100}
         history = [
-            {"package_name": "my-pkg", "fetch_date": "2026-03-01",
-             "total": 40000, "last_month": 2500, "last_week": 600, "last_day": 80},
-            {"package_name": "my-pkg", "fetch_date": "2026-04-01",
-             "total": 50000, "last_month": 3000, "last_week": 700, "last_day": 100},
+            {
+                "package_name": "my-pkg",
+                "fetch_date": "2026-03-01",
+                "total": 40000,
+                "last_month": 2500,
+                "last_week": 600,
+                "last_day": 80,
+            },
+            {
+                "package_name": "my-pkg",
+                "fetch_date": "2026-04-01",
+                "total": 50000,
+                "last_month": 3000,
+                "last_week": 700,
+                "last_day": 100,
+            },
         ]
         pypi_releases = [
             PyPIRelease(version="0.1.0", upload_date="2026-03-15"),
@@ -764,10 +853,14 @@ class TestProjectReport:
 
         output = os.path.join(os.path.dirname(temp_db), "project_report.html")
         result = generate_project_html_report(
-            "my-pkg", output,
-            stats=stats, history=history,
-            pypi_releases=pypi_releases, github_releases=github_releases,
-            python_versions=python_versions, os_stats=os_stats,
+            "my-pkg",
+            output,
+            stats=stats,
+            history=history,
+            pypi_releases=pypi_releases,
+            github_releases=github_releases,
+            python_versions=python_versions,
+            os_stats=os_stats,
         )
         assert result is True
 
@@ -793,10 +886,22 @@ class TestProjectReport:
         """Project report should work with PyPI releases only."""
         stats = {"total": 5000, "last_month": 300, "last_week": 70, "last_day": 10}
         history = [
-            {"package_name": "my-pkg", "fetch_date": "2026-03-01",
-             "total": 4000, "last_month": 250, "last_week": 60, "last_day": 8},
-            {"package_name": "my-pkg", "fetch_date": "2026-04-01",
-             "total": 5000, "last_month": 300, "last_week": 70, "last_day": 10},
+            {
+                "package_name": "my-pkg",
+                "fetch_date": "2026-03-01",
+                "total": 4000,
+                "last_month": 250,
+                "last_week": 60,
+                "last_day": 8,
+            },
+            {
+                "package_name": "my-pkg",
+                "fetch_date": "2026-04-01",
+                "total": 5000,
+                "last_month": 300,
+                "last_week": 70,
+                "last_day": 10,
+            },
         ]
         pypi_releases = [
             PyPIRelease(version="1.0", upload_date="2026-03-10"),
@@ -804,10 +909,14 @@ class TestProjectReport:
 
         output = os.path.join(os.path.dirname(temp_db), "project_report.html")
         result = generate_project_html_report(
-            "my-pkg", output,
-            stats=stats, history=history,
-            pypi_releases=pypi_releases, github_releases=[],
-            python_versions=[], os_stats=[],
+            "my-pkg",
+            output,
+            stats=stats,
+            history=history,
+            pypi_releases=pypi_releases,
+            github_releases=[],
+            python_versions=[],
+            os_stats=[],
         )
         assert result is True
 
@@ -824,9 +933,14 @@ class TestProjectReport:
 
         output = os.path.join(os.path.dirname(temp_db), "project_report.html")
         result = generate_project_html_report(
-            "my-pkg", output,
-            stats=stats, history=[], pypi_releases=[], github_releases=[],
-            python_versions=[], os_stats=[],
+            "my-pkg",
+            output,
+            stats=stats,
+            history=[],
+            pypi_releases=[],
+            github_releases=[],
+            python_versions=[],
+            os_stats=[],
         )
         assert result is True
 
@@ -840,19 +954,36 @@ class TestProjectReport:
         """When daily_series is supplied, the chart uses it and is titled Daily."""
         stats = {"total": 5000, "last_month": 300, "last_week": 70, "last_day": 10}
         daily = [
-            {"date": "2026-06-01", "dimension": "overall",
-             "category": "without_mirrors", "downloads": 100},
-            {"date": "2026-06-02", "dimension": "overall",
-             "category": "without_mirrors", "downloads": 137},
-            {"date": "2026-06-03", "dimension": "overall",
-             "category": "without_mirrors", "downloads": 121},
+            {
+                "date": "2026-06-01",
+                "dimension": "overall",
+                "category": "without_mirrors",
+                "downloads": 100,
+            },
+            {
+                "date": "2026-06-02",
+                "dimension": "overall",
+                "category": "without_mirrors",
+                "downloads": 137,
+            },
+            {
+                "date": "2026-06-03",
+                "dimension": "overall",
+                "category": "without_mirrors",
+                "downloads": 121,
+            },
         ]
         output = os.path.join(os.path.dirname(temp_db), "daily_project.html")
         result = generate_project_html_report(
-            "my-pkg", output,
-            stats=stats, history=[], daily_series=daily,
-            pypi_releases=[], github_releases=[],
-            python_versions=[], os_stats=[],
+            "my-pkg",
+            output,
+            stats=stats,
+            history=[],
+            daily_series=daily,
+            pypi_releases=[],
+            github_releases=[],
+            python_versions=[],
+            os_stats=[],
         )
         assert result is True
         html = Path(output).read_text()
@@ -863,17 +994,34 @@ class TestProjectReport:
         """Without daily_series, the chart falls back to snapshot totals."""
         stats = {"total": 5000, "last_month": 300, "last_week": 70, "last_day": 10}
         history = [
-            {"package_name": "my-pkg", "fetch_date": "2026-03-01",
-             "total": 4000, "last_month": 250, "last_week": 60, "last_day": 8},
-            {"package_name": "my-pkg", "fetch_date": "2026-04-01",
-             "total": 5000, "last_month": 300, "last_week": 70, "last_day": 10},
+            {
+                "package_name": "my-pkg",
+                "fetch_date": "2026-03-01",
+                "total": 4000,
+                "last_month": 250,
+                "last_week": 60,
+                "last_day": 8,
+            },
+            {
+                "package_name": "my-pkg",
+                "fetch_date": "2026-04-01",
+                "total": 5000,
+                "last_month": 300,
+                "last_week": 70,
+                "last_day": 10,
+            },
         ]
         output = os.path.join(os.path.dirname(temp_db), "snap_project.html")
         result = generate_project_html_report(
-            "my-pkg", output,
-            stats=stats, history=history, daily_series=None,
-            pypi_releases=[], github_releases=[],
-            python_versions=[], os_stats=[],
+            "my-pkg",
+            output,
+            stats=stats,
+            history=history,
+            daily_series=None,
+            pypi_releases=[],
+            github_releases=[],
+            python_versions=[],
+            os_stats=[],
         )
         assert result is True
         html = Path(output).read_text()

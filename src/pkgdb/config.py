@@ -54,6 +54,14 @@ class PkgdbConfig:
     check_z_threshold: float = 2.5
     check_min_weekly: float = 10.0
 
+    # [github]
+    github_user: str | None = None
+
+    # [ci]
+    # None scans each repository on its own default branch.
+    ci_branch: str | None = None
+    ci_ignore_workflows: list[str] = field(default_factory=list)
+
     # Raw parsed data for extensibility
     _raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
@@ -91,6 +99,8 @@ def load_config(config_path: Path | None = None) -> PkgdbConfig:
     report = raw.get("report", {})
     init_section = raw.get("init", {})
     check = raw.get("check", {})
+    github = raw.get("github", {})
+    ci = raw.get("ci", {})
 
     # Milestones must be a list of ints; ignore malformed entries gracefully.
     raw_milestones = check.get("milestones", [])
@@ -101,6 +111,11 @@ def load_config(config_path: Path | None = None) -> PkgdbConfig:
                 milestones.append(int(m))
             except (TypeError, ValueError):
                 logger.warning("Ignoring non-integer milestone in config: %r", m)
+
+    raw_ignore = ci.get("ignore_workflows", [])
+    ignore_workflows = (
+        [str(w) for w in raw_ignore] if isinstance(raw_ignore, list) else []
+    )
 
     return PkgdbConfig(
         database=defaults.get("database"),
@@ -114,5 +129,8 @@ def load_config(config_path: Path | None = None) -> PkgdbConfig:
         check_baseline_weeks=int(check.get("baseline_weeks", 8)),
         check_z_threshold=float(check.get("z_threshold", 2.5)),
         check_min_weekly=float(check.get("min_weekly", 10.0)),
+        github_user=github.get("user"),
+        ci_branch=ci.get("branch"),
+        ci_ignore_workflows=ignore_workflows,
         _raw=raw,
     )

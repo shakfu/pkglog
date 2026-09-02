@@ -1,5 +1,6 @@
 """Database operations for pkgdb."""
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -7,6 +8,8 @@ from pathlib import Path
 from typing import Any, Generator
 
 from .types import (
+    CI_STATE_FAIL,
+    CI_STATE_PASS,
     CategoryDownloads,
     DailyDownload,
     EnvSummary,
@@ -230,6 +233,50 @@ def init_db(conn: sqlite3.Connection) -> None:
             package_name TEXT PRIMARY KEY,
             high_water INTEGER NOT NULL,
             updated_date TEXT NOT NULL
+        )
+    """)
+    # The repository registry. Package-derived repos cover only the projects
+    # published to PyPI with a GitHub URL in their metadata, so repos reach the
+    # registry from three directions: the package fetch, `repo discover`, and
+    # `repo add`.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS github_repos (
+            repo_key TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            has_workflows INTEGER,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            default_branch TEXT,
+            added_date TEXT NOT NULL
+        )
+    """)
+    # Package to repo is many-to-one: several published packages can be built
+    # from one repository, so the link cannot live on either table's row.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS package_repos (
+            package_name TEXT NOT NULL,
+            repo_key TEXT NOT NULL,
+            PRIMARY KEY (package_name, repo_key)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_package_repos_repo
+        ON package_repos(repo_key)
+    """)
+    # Latest state only. `first_failed_at` is the one thing a scan cannot
+    # recompute from the API, and is what separates "broke minutes ago" from
+    # "broken for a month".
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS github_ci_status (
+            repo_key TEXT NOT NULL,
+            workflow_name TEXT NOT NULL,
+            state TEXT NOT NULL,
+            branch TEXT,
+            run_id INTEGER,
+            run_url TEXT,
+            run_started_at TEXT,
+            first_failed_at TEXT,
+            checked_at TEXT NOT NULL,
+            PRIMARY KEY (repo_key, workflow_name)
         )
     """)
     conn.commit()
@@ -981,6 +1028,7 @@ _PACKAGE_OWNED_TABLES = (
     "github_stats_history",
     "package_tags",
     "milestone_state",
+    "package_repos",
 )
 
 
@@ -991,9 +1039,19 @@ def cleanup_orphaned_stats(conn: sqlite3.Connection) -> dict[str, int]:
         Rows deleted per table, plus a ``total`` entry summing them.
     """
     untracked = "package_name NOT IN (SELECT package_name FROM packages)"
-    return _run_deletions(
-        conn, [(table, untracked, ()) for table in _PACKAGE_OWNED_TABLES]
+    deletions: list[tuple[str, str, tuple[Any, ...]]] = [
+        (table, untracked, ()) for table in _PACKAGE_OWNED_TABLES
+    ]
+    # CI rows are keyed by repository, so they orphan when a repo leaves the
+    # registry rather than when a package stops being tracked.
+    deletions.append(
+        (
+            "github_ci_status",
+            "repo_key NOT IN (SELECT repo_key FROM github_repos)",
+            (),
+        )
     )
+    return _run_deletions(conn, deletions)
 
 
 def prune_old_stats(conn: sqlite3.Connection, days: int = 365) -> dict[str, int]:
@@ -1296,3 +1354,300 @@ def get_github_stats_history(
 
     cursor = conn.execute("\n".join(query), params)
     return [dict(row) for row in cursor.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# Repository registry
+# ---------------------------------------------------------------------------
+
+REPO_SOURCE_PACKAGE = "package"
+REPO_SOURCE_DISCOVER = "discover"
+REPO_SOURCE_MANUAL = "manual"
+
+
+def normalize_repo_key(repo_key: str) -> str:
+    """Canonicalize an ``owner/name`` key: lowercased, no ``.git``, no scheme."""
+    key = repo_key.strip().rstrip("/")
+    for prefix in ("https://github.com/", "http://github.com/", "github.com/"):
+        if key.lower().startswith(prefix):
+            key = key[len(prefix) :]
+            break
+    if key.lower().endswith(".git"):
+        key = key[:-4]
+    return key.lower()
+
+
+def add_repo(
+    conn: sqlite3.Connection,
+    repo_key: str,
+    source: str = REPO_SOURCE_MANUAL,
+    has_workflows: int | None = None,
+    default_branch: str | None = None,
+    commit: bool = True,
+) -> bool:
+    """Add a repository to the scan registry.
+
+    Returns True when the row is new. An existing row keeps its source and
+    enabled flag; ``has_workflows`` and ``default_branch`` are only overwritten
+    when a value is supplied, so a cheap caller cannot erase what an expensive
+    one learned.
+    """
+    key = normalize_repo_key(repo_key)
+    existing = conn.execute(
+        "SELECT repo_key FROM github_repos WHERE repo_key = ?", (key,)
+    ).fetchone()
+    if existing is None:
+        conn.execute(
+            """INSERT INTO github_repos
+                   (repo_key, source, has_workflows, enabled, default_branch,
+                    added_date)
+               VALUES (?, ?, ?, 1, ?, ?)""",
+            (
+                key,
+                source,
+                has_workflows,
+                default_branch,
+                datetime.now().strftime("%Y-%m-%d"),
+            ),
+        )
+    else:
+        conn.execute(
+            """UPDATE github_repos
+                  SET has_workflows = COALESCE(?, has_workflows),
+                      default_branch = COALESCE(?, default_branch)
+                WHERE repo_key = ?""",
+            (has_workflows, default_branch, key),
+        )
+    if commit:
+        conn.commit()
+    return existing is None
+
+
+def remove_repo(conn: sqlite3.Connection, repo_key: str) -> bool:
+    """Remove a repository from the registry, along with its CI rows."""
+    key = normalize_repo_key(repo_key)
+    cursor = conn.execute("DELETE FROM github_repos WHERE repo_key = ?", (key,))
+    conn.execute("DELETE FROM github_ci_status WHERE repo_key = ?", (key,))
+    conn.execute("DELETE FROM package_repos WHERE repo_key = ?", (key,))
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def set_repo_enabled(conn: sqlite3.Connection, repo_key: str, enabled: bool) -> bool:
+    """Include or exclude a repository from scans without forgetting it."""
+    cursor = conn.execute(
+        "UPDATE github_repos SET enabled = ? WHERE repo_key = ?",
+        (1 if enabled else 0, normalize_repo_key(repo_key)),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def get_repos(
+    conn: sqlite3.Connection,
+    enabled_only: bool = True,
+    with_workflows_only: bool = False,
+) -> list[dict[str, Any]]:
+    """List registry rows, ordered by key.
+
+    ``with_workflows_only`` keeps repositories not yet probed: ``has_workflows``
+    is NULL until discovery looks, and dropping those would hide every repo
+    added by hand.
+    """
+    where = []
+    if enabled_only:
+        where.append("enabled = 1")
+    if with_workflows_only:
+        where.append("(has_workflows IS NULL OR has_workflows > 0)")
+    query = "SELECT * FROM github_repos"
+    if where:
+        query += " WHERE " + " AND ".join(where)
+    query += " ORDER BY repo_key"
+    return [dict(row) for row in conn.execute(query).fetchall()]
+
+
+def link_package_repo(
+    conn: sqlite3.Connection, package_name: str, repo_key: str, commit: bool = True
+) -> None:
+    """Record that a package is built from a repository."""
+    conn.execute(
+        "INSERT OR IGNORE INTO package_repos (package_name, repo_key) VALUES (?, ?)",
+        (package_name, normalize_repo_key(repo_key)),
+    )
+    if commit:
+        conn.commit()
+
+
+def get_repo_packages(conn: sqlite3.Connection) -> dict[str, list[str]]:
+    """Map each repository to the tracked packages built from it."""
+    rows = conn.execute(
+        """SELECT repo_key, package_name FROM package_repos
+           WHERE package_name IN (SELECT package_name FROM packages)
+           ORDER BY repo_key, package_name"""
+    ).fetchall()
+    mapping: dict[str, list[str]] = {}
+    for row in rows:
+        mapping.setdefault(row["repo_key"], []).append(row["package_name"])
+    return mapping
+
+
+def seed_repos_from_cache(conn: sqlite3.Connection) -> int:
+    """Populate an empty registry from data already on disk.
+
+    Reads the repo keys that previous GitHub fetches left in ``github_cache``
+    and ``github_stats_history``, so a first ``pkgdb ci`` has something to scan
+    without any network call. Suffixed cache keys (the issues-only count, the
+    run listings) are excluded -- they are not repository keys.
+
+    Returns the number of repositories added.
+    """
+    rows = conn.execute("""
+        SELECT DISTINCT repo_key FROM github_stats_history
+        UNION
+        SELECT repo_key FROM github_cache WHERE repo_key NOT LIKE '%#%'
+    """).fetchall()
+
+    added = 0
+    for row in rows:
+        key = normalize_repo_key(row["repo_key"])
+        if "/" not in key:
+            continue
+        cached = conn.execute(
+            "SELECT data FROM github_cache WHERE repo_key = ?", (key,)
+        ).fetchone()
+        default_branch = None
+        if cached is not None:
+            try:
+                default_branch = json.loads(cached["data"]).get("default_branch")
+            except (json.JSONDecodeError, TypeError):
+                default_branch = None
+        if add_repo(
+            conn,
+            key,
+            source=REPO_SOURCE_PACKAGE,
+            default_branch=default_branch,
+            commit=False,
+        ):
+            added += 1
+    conn.commit()
+    return added
+
+
+# ---------------------------------------------------------------------------
+# CI status
+# ---------------------------------------------------------------------------
+
+
+def store_ci_status(
+    conn: sqlite3.Connection,
+    repo_key: str,
+    workflow_name: str,
+    state: str,
+    branch: str | None = None,
+    run_id: int | None = None,
+    run_url: str | None = None,
+    run_started_at: str | None = None,
+    commit: bool = True,
+) -> str | None:
+    """Record a workflow's latest state and return its ``first_failed_at``.
+
+    The streak start is set from the run that broke the workflow, carried
+    forward while it stays broken, and cleared only on a pass. A cancelled or
+    still-running run therefore does not reset the clock: neither says the
+    failure is over, and resetting on one would report a month-old break as new.
+    """
+    key = normalize_repo_key(repo_key)
+    prev = conn.execute(
+        """SELECT state, first_failed_at FROM github_ci_status
+           WHERE repo_key = ? AND workflow_name = ?""",
+        (key, workflow_name),
+    ).fetchone()
+    prev_first_failed = prev["first_failed_at"] if prev is not None else None
+
+    if state == CI_STATE_PASS:
+        first_failed_at = None
+    elif state == CI_STATE_FAIL:
+        first_failed_at = prev_first_failed or run_started_at or utcnow().isoformat()
+    else:
+        first_failed_at = prev_first_failed
+
+    conn.execute(
+        """
+        INSERT INTO github_ci_status
+            (repo_key, workflow_name, state, branch, run_id, run_url,
+             run_started_at, first_failed_at, checked_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(repo_key, workflow_name) DO UPDATE SET
+            state = excluded.state,
+            branch = excluded.branch,
+            run_id = excluded.run_id,
+            run_url = excluded.run_url,
+            run_started_at = excluded.run_started_at,
+            first_failed_at = excluded.first_failed_at,
+            checked_at = excluded.checked_at
+        """,
+        (
+            key,
+            workflow_name,
+            state,
+            branch,
+            run_id,
+            run_url,
+            run_started_at,
+            first_failed_at,
+            utcnow().isoformat(),
+        ),
+    )
+    if commit:
+        conn.commit()
+    return first_failed_at
+
+
+def get_ci_status(
+    conn: sqlite3.Connection, repo_key: str | None = None
+) -> list[dict[str, Any]]:
+    """Return stored CI rows, for one repository or all of them."""
+    query = "SELECT * FROM github_ci_status"
+    params: list[Any] = []
+    if repo_key is not None:
+        query += " WHERE repo_key = ?"
+        params.append(normalize_repo_key(repo_key))
+    query += " ORDER BY repo_key, workflow_name"
+    return [dict(row) for row in conn.execute(query, params).fetchall()]
+
+
+def prune_ci_status(
+    conn: sqlite3.Connection,
+    repo_key: str,
+    keep: list[str],
+    commit: bool = True,
+) -> int:
+    """Drop a repository's CI rows for workflows not in ``keep``.
+
+    A workflow that is renamed or deleted keeps its last row forever otherwise,
+    so a report would show a failure for a workflow that no longer exists.
+    Only call this after a successful scan: pruning on a failed fetch would
+    erase state the scan simply could not see.
+
+    Returns the number of rows removed.
+    """
+    key = normalize_repo_key(repo_key)
+    placeholders = ",".join("?" for _ in keep)
+    query = f"DELETE FROM github_ci_status WHERE repo_key = ? AND workflow_name NOT IN ({placeholders})"
+    cursor = conn.execute(query, [key, *keep])
+    if commit:
+        conn.commit()
+    return cursor.rowcount
+
+
+def clear_ci_status(conn: sqlite3.Connection, repo_key: str | None = None) -> int:
+    """Delete stored CI rows. Returns the number removed."""
+    if repo_key is None:
+        cursor = conn.execute("DELETE FROM github_ci_status")
+    else:
+        cursor = conn.execute(
+            "DELETE FROM github_ci_status WHERE repo_key = ?",
+            (normalize_repo_key(repo_key),),
+        )
+    conn.commit()
+    return cursor.rowcount

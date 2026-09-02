@@ -78,9 +78,7 @@ class TestDatabaseOperations:
         conn = get_db_connection(temp_db)
         init_db(conn)
 
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='index'"
-        )
+        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='index'")
         indexes = {row["name"] for row in cursor.fetchall()}
         assert "idx_package_name" in indexes
         assert "idx_fetch_date" in indexes
@@ -128,6 +126,7 @@ class TestDatabaseOperations:
         # Connection should be closed after context
         # Verify by trying to use it (should fail)
         import sqlite3
+
         with pytest.raises(sqlite3.ProgrammingError):
             conn.execute("SELECT 1")
 
@@ -143,6 +142,7 @@ class TestDatabaseOperations:
 
         # Connection should be closed
         import sqlite3
+
         with pytest.raises(sqlite3.ProgrammingError):
             conn_ref.execute("SELECT 1")
 
@@ -157,7 +157,7 @@ class TestPackageManagement:
 
         cursor = db_conn.execute(
             "SELECT package_name FROM packages WHERE package_name = ?",
-            ("test-package",)
+            ("test-package",),
         )
         row = cursor.fetchone()
         assert row is not None
@@ -171,7 +171,7 @@ class TestPackageManagement:
 
         cursor = db_conn.execute(
             "SELECT COUNT(*) as count FROM packages WHERE package_name = ?",
-            ("test-package",)
+            ("test-package",),
         )
         assert cursor.fetchone()["count"] == 1
 
@@ -183,7 +183,7 @@ class TestPackageManagement:
 
         cursor = db_conn.execute(
             "SELECT COUNT(*) as count FROM packages WHERE package_name = ?",
-            ("test-package",)
+            ("test-package",),
         )
         assert cursor.fetchone()["count"] == 0
 
@@ -293,7 +293,12 @@ class TestStoreAndRetrieveStats:
     def test_store_stats_replaces_on_same_date(self, db_conn):
         """store_stats should replace stats for same package on same date."""
         stats1 = {"last_day": 100, "last_week": 700, "last_month": 3000, "total": 50000}
-        stats2 = {"last_day": 200, "last_week": 1400, "last_month": 6000, "total": 60000}
+        stats2 = {
+            "last_day": 200,
+            "last_week": 1400,
+            "last_month": 6000,
+            "total": 60000,
+        }
 
         store_stats(db_conn, "test-package", stats1)
         store_stats(db_conn, "test-package", stats2)
@@ -435,9 +440,18 @@ class TestBatchStatsStorage:
     def test_store_stats_batch_basic(self, db_conn):
         """store_stats_batch should store multiple packages in one transaction."""
         stats_list = [
-            ("pkg-a", {"last_day": 10, "last_week": 70, "last_month": 300, "total": 1000}),
-            ("pkg-b", {"last_day": 20, "last_week": 140, "last_month": 600, "total": 2000}),
-            ("pkg-c", {"last_day": 30, "last_week": 210, "last_month": 900, "total": 3000}),
+            (
+                "pkg-a",
+                {"last_day": 10, "last_week": 70, "last_month": 300, "total": 1000},
+            ),
+            (
+                "pkg-b",
+                {"last_day": 20, "last_week": 140, "last_month": 600, "total": 2000},
+            ),
+            (
+                "pkg-c",
+                {"last_day": 30, "last_week": 210, "last_month": 900, "total": 3000},
+            ),
         ]
 
         count = store_stats_batch(db_conn, stats_list)
@@ -462,7 +476,15 @@ class TestBatchStatsStorage:
         """store_stats_batch should use single commit (more efficient)."""
         # This is a behavioral test - batch should be faster than individual
         stats_list = [
-            (f"pkg-{i}", {"last_day": i, "last_week": i*7, "last_month": i*30, "total": i*100})
+            (
+                f"pkg-{i}",
+                {
+                    "last_day": i,
+                    "last_week": i * 7,
+                    "last_month": i * 30,
+                    "total": i * 100,
+                },
+            )
             for i in range(10)
         ]
 
@@ -498,12 +520,12 @@ class TestBatchStatsStorage:
         service.add_package("pkg-a", verify=False)
         service.add_package("pkg-b", verify=False)
 
-        recent_response = json.dumps({
-            "data": {"last_day": 100, "last_week": 700, "last_month": 3000}
-        })
-        overall_response = json.dumps({
-            "data": [{"category": "without_mirrors", "downloads": 50000}]
-        })
+        recent_response = json.dumps(
+            {"data": {"last_day": 100, "last_week": 700, "last_month": 3000}}
+        )
+        overall_response = json.dumps(
+            {"data": [{"category": "without_mirrors", "downloads": 50000}]}
+        )
 
         with mock_pypistats(recent=recent_response, overall=overall_response):
             result = service.fetch_all_stats()
@@ -528,8 +550,7 @@ class TestFetchAttemptTracking:
         record_fetch_attempt(conn, "test-pkg", success=True)
 
         cursor = conn.execute(
-            "SELECT * FROM fetch_attempts WHERE package_name = ?",
-            ("test-pkg",)
+            "SELECT * FROM fetch_attempts WHERE package_name = ?", ("test-pkg",)
         )
         row = cursor.fetchone()
         assert row is not None
@@ -546,8 +567,7 @@ class TestFetchAttemptTracking:
         record_fetch_attempt(conn, "test-pkg", success=False)
 
         cursor = conn.execute(
-            "SELECT * FROM fetch_attempts WHERE package_name = ?",
-            ("test-pkg",)
+            "SELECT * FROM fetch_attempts WHERE package_name = ?", ("test-pkg",)
         )
         row = cursor.fetchone()
         assert row is not None
@@ -566,13 +586,12 @@ class TestFetchAttemptTracking:
 
         cursor = conn.execute(
             "SELECT COUNT(*) as count FROM fetch_attempts WHERE package_name = ?",
-            ("test-pkg",)
+            ("test-pkg",),
         )
         assert cursor.fetchone()["count"] == 1
 
         cursor = conn.execute(
-            "SELECT success FROM fetch_attempts WHERE package_name = ?",
-            ("test-pkg",)
+            "SELECT success FROM fetch_attempts WHERE package_name = ?", ("test-pkg",)
         )
         assert cursor.fetchone()["success"] == 1
         conn.close()
@@ -616,7 +635,7 @@ class TestFetchAttemptTracking:
             INSERT INTO fetch_attempts (package_name, attempt_time, success)
             VALUES (?, datetime('now', '-25 hours'), 1)
             """,
-            ("pkg-a",)
+            ("pkg-a",),
         )
         conn.commit()
 
@@ -632,12 +651,12 @@ class TestFetchAttemptTracking:
         service.add_package("pkg-a", verify=False)
         service.add_package("pkg-b", verify=False)
 
-        recent_response = json.dumps({
-            "data": {"last_day": 100, "last_week": 700, "last_month": 3000}
-        })
-        overall_response = json.dumps({
-            "data": [{"category": "without_mirrors", "downloads": 50000}]
-        })
+        recent_response = json.dumps(
+            {"data": {"last_day": 100, "last_week": 700, "last_month": 3000}}
+        )
+        overall_response = json.dumps(
+            {"data": [{"category": "without_mirrors", "downloads": 50000}]}
+        )
 
         # First fetch - both packages
         with mock_pypistats(recent=recent_response, overall=overall_response):
@@ -834,8 +853,12 @@ def _record_attempt_at(conn, package_name: str, modifier: str) -> None:
         service.add_package("pkg-a", verify=False)
 
         # First fetch succeeds
-        recent = json.dumps({"data": {"last_day": 10, "last_week": 70, "last_month": 300}})
-        overall = json.dumps({"data": [{"category": "without_mirrors", "downloads": 5000}]})
+        recent = json.dumps(
+            {"data": {"last_day": 10, "last_week": 70, "last_month": 300}}
+        )
+        overall = json.dumps(
+            {"data": [{"category": "without_mirrors", "downloads": 5000}]}
+        )
         with mock_pypistats(recent=recent, overall=overall):
             result1 = service.fetch_all_stats()
 
@@ -910,7 +933,11 @@ class TestEnvStatsCache:
 
     def test_store_env_stats_none_inputs(self, temp_db):
         """store_env_stats should handle None inputs gracefully."""
-        from pkgdb import store_env_stats, get_cached_python_versions, get_cached_os_stats
+        from pkgdb import (
+            store_env_stats,
+            get_cached_python_versions,
+            get_cached_os_stats,
+        )
 
         conn = get_db_connection(temp_db)
         init_db(conn)
@@ -931,13 +958,23 @@ class TestEnvStatsCache:
         add_package(conn, "pkg-a")
         add_package(conn, "pkg-b")
 
-        store_env_stats(conn, "pkg-a",
+        store_env_stats(
+            conn,
+            "pkg-a",
             python_versions=[{"category": "3.12", "downloads": 100}],
             os_data=[{"category": "Linux", "downloads": 200}],
         )
-        store_env_stats(conn, "pkg-b",
-            python_versions=[{"category": "3.12", "downloads": 50}, {"category": "3.11", "downloads": 30}],
-            os_data=[{"category": "Linux", "downloads": 100}, {"category": "Windows", "downloads": 80}],
+        store_env_stats(
+            conn,
+            "pkg-b",
+            python_versions=[
+                {"category": "3.12", "downloads": 50},
+                {"category": "3.11", "downloads": 30},
+            ],
+            os_data=[
+                {"category": "Linux", "downloads": 100},
+                {"category": "Windows", "downloads": 80},
+            ],
         )
 
         summary = get_cached_env_summary(conn)
@@ -964,14 +1001,21 @@ class TestEnvStatsCache:
 
     def test_cleanup_orphaned_stats_cleans_env_tables(self, temp_db):
         """cleanup_orphaned_stats should also remove orphaned env stats."""
-        from pkgdb import store_env_stats, get_cached_python_versions, cleanup_orphaned_stats
+        from pkgdb import (
+            store_env_stats,
+            get_cached_python_versions,
+            cleanup_orphaned_stats,
+        )
 
         conn = get_db_connection(temp_db)
         init_db(conn)
         add_package(conn, "tracked-pkg")
 
-        store_env_stats(conn, "tracked-pkg",
-            python_versions=[{"category": "3.12", "downloads": 100}])
+        store_env_stats(
+            conn,
+            "tracked-pkg",
+            python_versions=[{"category": "3.12", "downloads": 100}],
+        )
         # Insert env data for a package that isn't tracked
         conn.execute(
             "INSERT INTO python_version_stats (package_name, fetch_date, category, downloads) VALUES (?, ?, ?, ?)",
@@ -999,8 +1043,9 @@ class TestEnvStatsCache:
             ("test-pkg", "2020-01-01", "3.8", 100),
         )
         # Insert recent env data
-        store_env_stats(conn, "test-pkg",
-            python_versions=[{"category": "3.12", "downloads": 200}])
+        store_env_stats(
+            conn, "test-pkg", python_versions=[{"category": "3.12", "downloads": 200}]
+        )
 
         prune_old_stats(conn, days=30)
 
@@ -1018,14 +1063,20 @@ class TestEnvStatsCache:
         service = PackageStatsService(temp_db)
         service.add_package("test-pkg", verify=False)
 
-        recent = json.dumps({"data": {"last_day": 10, "last_week": 70, "last_month": 300}})
-        overall = json.dumps({"data": [{"category": "without_mirrors", "downloads": 5000}]})
+        recent = json.dumps(
+            {"data": {"last_day": 10, "last_week": 70, "last_month": 300}}
+        )
+        overall = json.dumps(
+            {"data": [{"category": "without_mirrors", "downloads": 5000}]}
+        )
         py_response = json.dumps({"data": [{"category": "3.12", "downloads": 100}]})
         os_response = json.dumps({"data": [{"category": "Linux", "downloads": 200}]})
 
         with patch("pkgdb.api.pypistats.recent", return_value=recent):
             with patch("pkgdb.api.pypistats.overall", return_value=overall):
-                with patch("pkgdb.api.pypistats.python_minor", return_value=py_response):
+                with patch(
+                    "pkgdb.api.pypistats.python_minor", return_value=py_response
+                ):
                     with patch("pkgdb.api.pypistats.system", return_value=os_response):
                         result = service.fetch_all_stats()
 
@@ -1051,24 +1102,33 @@ class TestEnvStatsCache:
         service.add_package("test-pkg", verify=False)
 
         # Store download stats and env data
-        recent = json.dumps({"data": {"last_day": 10, "last_week": 70, "last_month": 300}})
-        overall = json.dumps({"data": [{"category": "without_mirrors", "downloads": 5000}]})
+        recent = json.dumps(
+            {"data": {"last_day": 10, "last_week": 70, "last_month": 300}}
+        )
+        overall = json.dumps(
+            {"data": [{"category": "without_mirrors", "downloads": 5000}]}
+        )
         py_response = json.dumps({"data": [{"category": "3.12", "downloads": 100}]})
         os_response = json.dumps({"data": [{"category": "Linux", "downloads": 200}]})
 
         with patch("pkgdb.api.pypistats.recent", return_value=recent):
             with patch("pkgdb.api.pypistats.overall", return_value=overall):
-                with patch("pkgdb.api.pypistats.python_minor", return_value=py_response):
+                with patch(
+                    "pkgdb.api.pypistats.python_minor", return_value=py_response
+                ):
                     with patch("pkgdb.api.pypistats.system", return_value=os_response):
                         service.fetch_all_stats()
 
         # Generate report -- should NOT call python_minor or system APIs
         import tempfile
+
         with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as f:
             output = f.name
 
-        with patch("pkgdb.api.pypistats.python_minor") as mock_py, \
-             patch("pkgdb.api.pypistats.system") as mock_os:
+        with (
+            patch("pkgdb.api.pypistats.python_minor") as mock_py,
+            patch("pkgdb.api.pypistats.system") as mock_os,
+        ):
             service.generate_package_report("test-pkg", output)
             mock_py.assert_not_called()
             mock_os.assert_not_called()
@@ -1418,7 +1478,8 @@ class TestDailyDownloads:
         add_package(db_conn, "pkg")
         # A single snapshot so the package appears in latest stats.
         store_stats(
-            db_conn, "pkg",
+            db_conn,
+            "pkg",
             {"last_day": 10, "last_week": 70, "last_month": 300, "total": 5000},
         )
         # 14 days of daily data: last 7 days sum to 700, prior 7 to 350 -> +100%
@@ -1714,15 +1775,19 @@ class TestMaintenanceReporting:
                 " last_week, last_month, total) VALUES (?, '2024-01-01', 1, 1, 1, 1)",
                 (pkg,),
             )
-            store_daily_downloads(db_conn, pkg, [
-                {
-                    "date": f"2024-01-0{i}",
-                    "dimension": "overall",
-                    "category": "without_mirrors",
-                    "downloads": 10,
-                }
-                for i in range(1, 4)
-            ])
+            store_daily_downloads(
+                db_conn,
+                pkg,
+                [
+                    {
+                        "date": f"2024-01-0{i}",
+                        "dimension": "overall",
+                        "category": "without_mirrors",
+                        "downloads": 10,
+                    }
+                    for i in range(1, 4)
+                ],
+            )
             store_github_stats_snapshot(db_conn, pkg, "o/r", 1, 1, 1, 1)
         db_conn.commit()
 
@@ -1745,14 +1810,18 @@ class TestMaintenanceReporting:
             "INSERT INTO package_stats (package_name, fetch_date, last_day,"
             " last_week, last_month, total) VALUES ('pkg', '2024-06-01', 1, 1, 1, 1)"
         )
-        store_daily_downloads(db_conn, "pkg", [
-            {
-                "date": "2024-01-15",
-                "dimension": "overall",
-                "category": "without_mirrors",
-                "downloads": 10,
-            }
-        ])
+        store_daily_downloads(
+            db_conn,
+            "pkg",
+            [
+                {
+                    "date": "2024-01-15",
+                    "dimension": "overall",
+                    "category": "without_mirrors",
+                    "downloads": 10,
+                }
+            ],
+        )
         db_conn.commit()
 
         stats = get_database_stats(db_conn)
@@ -1794,15 +1863,19 @@ class TestMaintenanceReporting:
             "INSERT INTO package_stats (package_name, fetch_date, last_day,"
             " last_week, last_month, total) VALUES ('pkg', '2000-01-01', 1, 1, 1, 1)"
         )
-        store_daily_downloads(db_conn, "pkg", [
-            {
-                "date": f"2000-01-0{i}",
-                "dimension": "overall",
-                "category": "without_mirrors",
-                "downloads": 10,
-            }
-            for i in range(1, 5)
-        ])
+        store_daily_downloads(
+            db_conn,
+            "pkg",
+            [
+                {
+                    "date": f"2000-01-0{i}",
+                    "dimension": "overall",
+                    "category": "without_mirrors",
+                    "downloads": 10,
+                }
+                for i in range(1, 5)
+            ],
+        )
         db_conn.commit()
 
         deleted = prune_old_stats(db_conn, days=30)

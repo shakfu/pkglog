@@ -122,6 +122,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 }
             )
 
+        elif path == "/api/ci":
+            # The last recorded scan, never a fresh one: a cold scan takes
+            # seconds and the dashboard must not block on it.
+            self._respond_json(svc.get_ci_rows())
+
         elif path.startswith("/api/releases/"):
             package = path[14:]  # strip "/api/releases/"
             pypi_releases, github_releases = svc.fetch_package_releases(package)

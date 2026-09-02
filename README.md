@@ -24,9 +24,11 @@ It retrieves data through the pypistats and GitHub APIs, storing it as historica
 
 - **GitHub integration** - repository stats (stars, forks, activity, language), a daily metrics snapshot with star-growth tracking, and release history.
 
+- **CI failure scanning** (`ci`) - the latest run of every GitHub Actions workflow across your repositories, failures only, with how long each has been broken. Exits non-zero for shell/CI notifiers. Repositories come from a registry (`repo discover`) rather than from the package list, so projects with no PyPI release are covered too. Authenticates through the `gh` CLI if you are logged in, so there is usually no token to configure. Renders as a terminal table, JSON, a standalone HTML report (`ci -o`), a section of the main report (`report --ci`), or a dashboard panel.
+
 - **Export and badges** - CSV / JSON / Markdown export, shields.io-style SVG badges, and machine-readable `--json` on most commands.
 
-- **Configuration file** - `~/.pkgdb/config.toml` for persistent defaults, including anomaly thresholds and milestones.
+- **Configuration file** - `~/.pkgdb/config.toml` for persistent defaults, including anomaly thresholds, milestones, and CI scan settings.
 
 ## Installation
 
@@ -97,6 +99,13 @@ sort_by = "total"       # default sort order (total, month, week, day, growth, n
 # baseline_weeks = 8    # weeks of history used as the anomaly baseline
 # z_threshold = 2.5     # std-devs from baseline to flag a spike/drop
 # min_weekly = 10       # ignore packages averaging fewer weekly downloads
+
+[github]
+# user = "myusername"   # default GitHub user for 'repo discover'
+
+[ci]
+# branch = "main"       # scan this branch everywhere (default: each repo's own)
+# ignore_workflows = ["nightly*"]  # skip workflows matching these patterns
 ```
 
 CLI flags always override config values. The config file is optional -- all settings have sensible defaults.
@@ -214,6 +223,31 @@ pkgdb github cache
 
 # Clear expired GitHub cache entries (or --all for everything)
 pkgdb github clear
+
+# Register your GitHub repositories for CI scanning (once)
+pkgdb repo discover --user <github-user>
+
+# Report failing workflows; exits non-zero if any are failing, so it gates a
+# shell or cron step. Run listings are cached for an hour
+pkgdb ci
+
+# Include passing workflows, or scan one repository directly
+pkgdb ci --all
+pkgdb ci --repo owner/name
+
+# Machine-readable, or report without affecting the exit code
+pkgdb ci --json
+pkgdb ci --exit-zero
+
+# Write an HTML CI report to ~/.pkgdb/ci-report.html and open it
+pkgdb ci -o
+
+# Add a CI section to the main report. Always exits 0, and needs stored download
+# stats -- with none it writes nothing at all
+pkgdb report --ci
+
+# Inspect the scan registry
+pkgdb repo list
 
 # Launch interactive web dashboard (opens browser)
 pkgdb serve
@@ -337,14 +371,19 @@ Modular CLI application with the following commands:
 
 - **export**: Export stats in CSV, JSON, or Markdown format
 
+**CI monitoring:**
+- **repo**: Manage the repository registry that `ci` scans. `discover --user <name>` registers an account's repositories, records how many workflows each defines, and links tracked packages to same-named repositories; `add` / `remove` / `list` manage it by hand
+
+- **ci**: Report the latest run of every GitHub Actions workflow in the registered repositories, failures only unless `--all`. Exits non-zero when any workflow is failing, for CI/notifier use. Each repository is scanned on its own default branch, and each failure carries the age of its streak. `-o` also writes an HTML report
+
 **Reporting:**
-- **report**: Generate HTML report with SVG charts. With `-e` flag, includes Python/OS summary. With `-g` flag, includes GitHub stats (stars, forks, language, activity) in the table. With package argument, generates detailed single-package report. With `-p/--project` flag, generates project view with release timeline overlay
+- **report**: Generate HTML report with SVG charts. With `-e` flag, includes Python/OS summary. With `-g` flag, includes GitHub stats (stars, forks, language, activity) in the table. With `-c` flag, includes a CI status section. With package argument, generates detailed single-package report. With `-p/--project` flag, generates project view with release timeline overlay
 
 - **badge**: Generate shields.io-style SVG badge for a package
 
-- **update**: Run fetch then report in one step (supports `-e` for environment summary, `-g` for GitHub stats)
+- **update**: Run fetch then report in one step (supports `-e` for environment summary, `-g` for GitHub stats, `-c` for CI status)
 
-- **serve**: Launch interactive web dashboard with live data from SQLite. Overview with sortable/filterable stats table, package detail with zoomable download and GitHub-stars charts plus release markers, comparison with multi-package overlay
+- **serve**: Launch interactive web dashboard with live data from SQLite. Overview with sortable/filterable stats table and a CI failure panel, package detail with zoomable download and GitHub-stars charts plus release markers, comparison with multi-package overlay
 
 **Maintenance:**
 - **cleanup**: Remove orphaned stats and optionally prune old data
@@ -355,6 +394,7 @@ Modular CLI application with the following commands:
 
 ```
 packages.json -> pypistats + GitHub APIs -> SQLite (pkg.db) -> terminal / HTML reports / web dashboard / anomaly checks
+repo registry -> GitHub Actions API ----^                                              / CI reports
 ```
 
 ### Database schema
@@ -443,7 +483,32 @@ The `package_tags` table groups packages:
 
 - `tag`: Normalized (lowercased) tag name
 
-Stats are upserted per package per day. Fetch attempts are tracked to avoid hitting PyPI rate limits - packages are only fetched once per 24-hour period. The daily download series is backfilled (~180 days) on first fetch and refreshed idempotently on each run. Environment stats are cached alongside download stats, so reports can be generated offline. GitHub API responses are cached for 24 hours to minimize API calls, while a daily GitHub metrics snapshot accumulates for star/fork history. Release data (PyPI and GitHub) is cached for 24 hours.
+The `github_repos` table is the registry of repositories that `ci` scans:
+- `repo_key`: Lowercased `owner/repo` identifier (primary key)
+
+- `source`: How it was registered - `package`, `discover`, or `manual`
+
+- `has_workflows`: Workflow count from discovery. Null until probed, and repositories are scanned while unknown
+
+- `enabled`: Whether scans include it
+
+- `default_branch`: Branch the scan uses when none is given
+
+The `package_repos` table links packages to repositories:
+- `package_name`, `repo_key`: Many-to-one - several published packages can be built from one repository
+
+The `github_ci_status` table stores the latest state of each workflow:
+- `repo_key`, `workflow_name`: Primary key. A repository with no runs on the scanned branch stores one row under the name `-`
+
+- `state`: `PASS`, `FAIL`, `RUNNING`, `NO_RUNS`, or the GitHub conclusion upcased (`CANCELLED`, `SKIPPED`)
+
+- `branch`, `run_id`, `run_url`, `run_started_at`: The run the state came from
+
+- `first_failed_at`: Start of the current failing streak, and the one value a scan cannot recompute from the API. Carried across cancelled and in-progress runs, cleared only by a pass
+
+- `checked_at`: When the scan last saw this workflow
+
+Stats are upserted per package per day. Fetch attempts are tracked to avoid hitting PyPI rate limits - packages are only fetched once per 24-hour period. The daily download series is backfilled (~180 days) on first fetch and refreshed idempotently on each run. Environment stats are cached alongside download stats, so reports can be generated offline. GitHub API responses are cached for 24 hours to minimize API calls, while a daily GitHub metrics snapshot accumulates for star/fork history. Release data (PyPI and GitHub) is cached for 24 hours. Workflow run listings share `github_cache` under a per-branch key but expire after one hour, because CI state changes on every push. A scan forgets workflows it did not see, so a renamed or deleted workflow stops reporting its last failure; a repository it could not reach keeps whatever was recorded, because unreachable is unknown rather than empty.
 
 ## Files
 
@@ -468,7 +533,7 @@ Source modules in `src/pkgdb/`:
 
 - `dashboard.py`: HTML page templates for the dashboard (overview, detail, comparison)
 
-- `github.py`: GitHub API client with caching and rate limit handling
+- `github.py`: GitHub API client with caching and rate limit handling, including Actions workflow runs for `pkgdb ci`
 
 - `badges.py`: SVG badge generation
 
@@ -488,6 +553,8 @@ Data files (all in `~/.pkgdb/`):
 - `pkg.db`: SQLite database (auto-created)
 
 - `report.html`: Generated HTML report (default output)
+
+- `ci-report.html`: Generated CI status report (`pkgdb ci -o`)
 
 ## GitHub Actions
 

@@ -41,11 +41,11 @@ class TestConfig:
         """load_config reads [defaults] section."""
         config_path = tmp_path / "config.toml"
         config_path.write_text(
-            '[defaults]\n'
+            "[defaults]\n"
             'database = "/custom/path.db"\n'
-            'github = true\n'
-            'environment = true\n'
-            'no_browser = true\n'
+            "github = true\n"
+            "environment = true\n"
+            "no_browser = true\n"
             'sort_by = "month"\n'
         )
         config = load_config(config_path)
@@ -58,30 +58,21 @@ class TestConfig:
     def test_load_config_report_section(self, tmp_path):
         """load_config reads [report] section."""
         config_path = tmp_path / "config.toml"
-        config_path.write_text(
-            '[report]\n'
-            'output = "/custom/report.html"\n'
-        )
+        config_path.write_text('[report]\noutput = "/custom/report.html"\n')
         config = load_config(config_path)
         assert config.report_output == "/custom/report.html"
 
     def test_load_config_init_section(self, tmp_path):
         """load_config reads [init] section."""
         config_path = tmp_path / "config.toml"
-        config_path.write_text(
-            '[init]\n'
-            'pypi_user = "testuser"\n'
-        )
+        config_path.write_text('[init]\npypi_user = "testuser"\n')
         config = load_config(config_path)
         assert config.pypi_user == "testuser"
 
     def test_load_config_partial_sections(self, tmp_path):
         """load_config handles partially filled config."""
         config_path = tmp_path / "config.toml"
-        config_path.write_text(
-            '[defaults]\n'
-            'github = true\n'
-        )
+        config_path.write_text("[defaults]\ngithub = true\n")
         config = load_config(config_path)
         assert config.github is True
         assert config.database is None
@@ -106,10 +97,7 @@ class TestConfig:
     def test_load_config_check_ignores_bad_milestones(self, tmp_path):
         """Non-integer milestone entries are skipped, not fatal."""
         config_path = tmp_path / "config.toml"
-        config_path.write_text(
-            "[check]\n"
-            'milestones = [1000, "oops", 5000]\n'
-        )
+        config_path.write_text('[check]\nmilestones = [1000, "oops", 5000]\n')
         config = load_config(config_path)
         assert config.check_milestones == [1000, 5000]
 
@@ -135,12 +123,7 @@ class TestConfig:
     def test_load_config_raw_data_preserved(self, tmp_path):
         """load_config preserves raw parsed data."""
         config_path = tmp_path / "config.toml"
-        config_path.write_text(
-            '[defaults]\n'
-            'github = true\n'
-            '[custom]\n'
-            'key = "value"\n'
-        )
+        config_path.write_text('[defaults]\ngithub = true\n[custom]\nkey = "value"\n')
         config = load_config(config_path)
         assert config._raw.get("custom", {}).get("key") == "value"
 

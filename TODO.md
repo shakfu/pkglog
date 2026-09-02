@@ -12,9 +12,11 @@ Feature ideas for pkgdb, ordered by priority.
 ### Package Discovery
 - [ ] Import packages from pyproject.toml `[project]` section
 
-### GitHub Integration (via `gh` CLI)
-- [ ] Auto-discover packages from your repos (scan for pyproject.toml)
+### GitHub Integration
+- [ ] Auto-discover packages from your repos (scan for pyproject.toml) - the `github_repos` registry added for `pkgdb ci` is the prerequisite
 - [ ] Publish HTML report to GitHub Pages - `pkgdb publish`
+- [ ] Report CI failures as `pkgdb check` events, so one command covers downloads and CI
+- [ ] CI status column in the HTML report and dashboard
 
 ### Organization
 - [ ] Package groups/tags - group related packages, aggregate stats per group

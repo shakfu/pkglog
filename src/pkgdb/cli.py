@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 import webbrowser
@@ -12,16 +13,18 @@ from tabulate import tabulate
 from .config import PkgdbConfig, load_config
 from .db import DEFAULT_DB_FILE, DEFAULT_REPORT_FILE, get_config_dir, get_db
 from .db import get_next_update_seconds
+from .github import CI_RUN_WINDOW
 from .logging import setup_logging
 from .service import PackageStatsService
 from .types import PackageStats
-from .utils import make_sparkline, parse_date_arg
+from .utils import make_sparkline, parse_date_arg, utcnow
 from . import __version__
 
 logger = logging.getLogger("pkgdb")
 
 
 DEFAULT_PACKAGES_FILE = str(get_config_dir() / "packages.json")
+DEFAULT_CI_REPORT_FILE = str(get_config_dir() / "ci-report.html")
 
 
 def load_packages(packages_file: str) -> list[str]:
@@ -174,8 +177,15 @@ def cmd_report(args: argparse.Namespace) -> None:
             logger.info("Fetching environment data (this may take a moment)...")
 
         include_github = getattr(args, "github", False)
+        include_ci = getattr(args, "ci", False)
+        if include_ci:
+            logger.info("Scanning repositories for CI status...")
+
         if not service.generate_report(
-            args.output, include_env=include_env, include_github=include_github
+            args.output,
+            include_env=include_env,
+            include_github=include_github,
+            include_ci=include_ci,
         ):
             logger.warning("No data in database. Run 'fetch' first.")
             return
@@ -1283,6 +1293,238 @@ def cmd_github(args: argparse.Namespace) -> None:
     logger.info("Done. (%d succeeded, %d failed)", len(successful), len(failed))
 
 
+def _humanize_age(timestamp: str | None) -> str:
+    """Render an ISO timestamp as a compact age (``3h``, ``6d``, ``-``)."""
+    if not timestamp:
+        return "-"
+    try:
+        moment = datetime.fromisoformat(timestamp.replace("Z", ""))
+    except ValueError:
+        return "-"
+    if moment.tzinfo is not None:
+        moment = moment.replace(tzinfo=None)
+    seconds = (utcnow() - moment).total_seconds()
+    if seconds < 0:
+        return "0m"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}m"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)}h"
+    return f"{int(seconds // 86400)}d"
+
+
+def cmd_ci(args: argparse.Namespace) -> int:
+    """CI command: report the latest workflow state of tracked repositories.
+
+    Shows failures only unless ``--all`` is given, and exits non-zero when any
+    workflow is failing so it composes with shell and CI notifiers. Repositories
+    whose runs could not be fetched are reported as warnings but do not affect
+    the exit code -- an unreachable repository is unknown, not broken.
+    """
+    service = PackageStatsService(args.database)
+    config = load_config()
+
+    repos = getattr(args, "repo", None) or None
+    branch = getattr(args, "branch", None) or config.ci_branch
+    show_all = getattr(args, "all", False)
+    json_output = getattr(args, "json", False)
+
+    results = service.fetch_ci_status(
+        repos=repos,
+        branch=branch,
+        use_cache=not getattr(args, "no_cache", False),
+        limit=getattr(args, "limit", CI_RUN_WINDOW),
+        ignore_workflows=config.ci_ignore_workflows,
+    )
+
+    if not results:
+        logger.warning(
+            "No repositories to scan. Run 'pkgdb repo discover --user <name>' "
+            "or 'pkgdb repo add <owner>/<name>'."
+        )
+        return 0
+
+    failing = [r for r in results if r.failures]
+    errored = [r for r in results if r.error]
+
+    rows = []
+    for result in results:
+        for entry in result.entries:
+            if not show_all and not entry.is_failure:
+                continue
+            failing_for = entry.failing_days
+            rows.append(
+                [
+                    result.repo_key,
+                    entry.workflow_name,
+                    entry.state,
+                    entry.branch or result.branch or "-",
+                    _humanize_age(entry.run_started_at),
+                    f"{failing_for}d" if failing_for is not None else "-",
+                    entry.run_url or "-",
+                ]
+            )
+
+    if json_output:
+        print(
+            json.dumps(
+                [
+                    {
+                        "repo": result.repo_key,
+                        "branch": result.branch,
+                        "packages": result.packages,
+                        "error": result.error,
+                        "workflows": [
+                            {
+                                "workflow": entry.workflow_name,
+                                "state": entry.state,
+                                "branch": entry.branch,
+                                "run_id": entry.run_id,
+                                "url": entry.run_url,
+                                "started_at": entry.run_started_at,
+                                "first_failed_at": entry.first_failed_at,
+                                "failing_days": entry.failing_days,
+                            }
+                            for entry in result.entries
+                            if show_all or entry.is_failure
+                        ],
+                    }
+                    for result in results
+                    if show_all or result.failures or result.error
+                ],
+                indent=2,
+            )
+        )
+    elif rows:
+        print()
+        print(
+            tabulate(
+                rows,
+                headers=[
+                    "Repo",
+                    "Workflow",
+                    "State",
+                    "Branch",
+                    "Age",
+                    "Failing",
+                    "Run",
+                ],
+                tablefmt="simple",
+            )
+        )
+        print()
+
+    if not json_output:
+        if failing:
+            logger.warning(
+                "%d of %d repositories have failing workflows.",
+                len(failing),
+                len(results),
+            )
+        else:
+            logger.info("All %d repositories are green.", len(results))
+        for result in errored:
+            logger.warning("  %s: %s", result.repo_key, result.error)
+
+    output = getattr(args, "output", None)
+    if output:
+        service.generate_ci_report(output, scan=False, show_all=show_all)
+        logger.info("CI report saved to %s", output)
+        if not getattr(args, "no_browser", False):
+            webbrowser.open_new_tab(Path(output).resolve().as_uri())
+
+    if failing and not getattr(args, "exit_zero", False):
+        return 1
+    return 0
+
+
+def cmd_repo(args: argparse.Namespace) -> None:
+    """Repo command: manage the repository scan registry."""
+    service = PackageStatsService(args.database)
+    subcommand = getattr(args, "repo_command", "list")
+    json_output = getattr(args, "json", False)
+
+    if subcommand == "add":
+        if service.add_repo(args.name):
+            logger.info("Added %s to the scan registry.", args.name)
+        else:
+            logger.info("%s is already registered.", args.name)
+        return
+
+    if subcommand == "remove":
+        if service.remove_repo(args.name):
+            logger.info("Removed %s from the scan registry.", args.name)
+        else:
+            logger.warning("%s is not registered.", args.name)
+        return
+
+    if subcommand == "discover":
+        config = load_config()
+        user = getattr(args, "user", None) or config.github_user
+        if not user:
+            logger.error(
+                "No GitHub user given. Pass --user, or set [github] user in "
+                "~/.pkgdb/config.toml."
+            )
+            return
+        logger.info("Discovering repositories for '%s'...", user)
+        summary = service.discover_repos(
+            user,
+            include_forks=getattr(args, "include_forks", False),
+            include_archived=getattr(args, "include_archived", False),
+            probe_workflows=not getattr(args, "no_probe", False),
+        )
+        if json_output:
+            print(json.dumps(summary, indent=2))
+            return
+        if "error" in summary:
+            logger.error("%s", summary["error"])
+            return
+        logger.info(
+            "Found %d repositories (%d with workflows), added %d, linked %d packages.",
+            summary["found"],
+            summary["with_workflows"],
+            summary["added"],
+            summary["linked"],
+        )
+        return
+
+    # Default: list
+    show_all = getattr(args, "all", False)
+    repos = service.list_repos(enabled_only=not show_all)
+    if json_output:
+        print(json.dumps(repos, indent=2))
+        return
+    if not repos:
+        logger.warning(
+            "No repositories registered. Run 'pkgdb repo discover --user <name>'."
+        )
+        return
+
+    rows = [
+        [
+            repo["repo_key"],
+            repo["source"],
+            "yes"
+            if repo["has_workflows"]
+            else ("no" if repo["has_workflows"] == 0 else "?"),
+            "yes" if repo["enabled"] else "no",
+            repo["default_branch"] or "-",
+            ", ".join(repo["packages"]) or "-",
+        ]
+        for repo in repos
+    ]
+    print()
+    print(
+        tabulate(
+            rows,
+            headers=["Repo", "Source", "Workflows", "Enabled", "Branch", "Packages"],
+            tablefmt="simple",
+        )
+    )
+    print(f"\n{len(repos)} repositories registered.")
+
+
 def cmd_version(args: argparse.Namespace) -> None:
     """Version command: show pkgdb version."""
     print(f"pkgdb {__version__}")
@@ -1664,6 +1906,12 @@ def create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Generate project view with release timeline (requires package name)",
     )
+    report_parser.add_argument(
+        "-c",
+        "--ci",
+        action="store_true",
+        help="Include a CI status section (scans registered repositories)",
+    )
     report_parser.set_defaults(func=cmd_report)
 
     # releases command
@@ -1798,6 +2046,12 @@ def create_parser() -> argparse.ArgumentParser:
         help="Also fetch GitHub repository stats (stars, forks, etc.)",
     )
     update_parser.add_argument(
+        "-c",
+        "--ci",
+        action="store_true",
+        help="Include a CI status section (scans registered repositories)",
+    )
+    update_parser.add_argument(
         "--delay",
         type=float,
         default=1.0,
@@ -1909,6 +2163,128 @@ def create_parser() -> argparse.ArgumentParser:
     gh_clear.set_defaults(func=cmd_github, github_command="clear")
 
     github_parser.set_defaults(func=cmd_github, github_command="fetch")
+
+    # ci command
+    ci_parser = subparsers.add_parser(
+        "ci",
+        help="Report failing GitHub Actions workflows",
+        description=(
+            "Scan registered repositories for the latest run of each workflow. "
+            "Shows failures only unless --all is given, and exits 1 when any "
+            "workflow is failing."
+        ),
+    )
+    ci_parser.add_argument(
+        "-r",
+        "--repo",
+        action="append",
+        metavar="OWNER/NAME",
+        help="Scan this repository instead of the registry (repeatable)",
+    )
+    ci_parser.add_argument(
+        "-b",
+        "--branch",
+        help="Branch to scan (default: each repository's default branch)",
+    )
+    ci_parser.add_argument(
+        "-a",
+        "--all",
+        action="store_true",
+        help="Show passing workflows too, not just failures",
+    )
+    ci_parser.add_argument(
+        "--limit",
+        type=int,
+        default=CI_RUN_WINDOW,
+        help=f"Runs to inspect per repository (default: {CI_RUN_WINDOW})",
+    )
+    ci_parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Bypass the cache and fetch fresh run data",
+    )
+    ci_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output in JSON format",
+    )
+    ci_parser.add_argument(
+        "--exit-zero",
+        action="store_true",
+        help="Always exit 0, even when workflows are failing",
+    )
+    ci_parser.add_argument(
+        "-o",
+        "--output",
+        nargs="?",
+        const=DEFAULT_CI_REPORT_FILE,
+        help=(
+            f"Also write an HTML report and open it (default: {DEFAULT_CI_REPORT_FILE})"
+        ),
+    )
+    ci_parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Don't open the HTML report in a browser",
+    )
+    ci_parser.set_defaults(func=cmd_ci)
+
+    # repo command
+    repo_parser = subparsers.add_parser(
+        "repo",
+        help="Manage the repository scan registry used by 'ci'",
+    )
+    repo_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output in JSON format",
+    )
+    repo_sub = repo_parser.add_subparsers(dest="repo_command")
+
+    repo_list = repo_sub.add_parser("list", help="List registered repositories")
+    repo_list.add_argument(
+        "-a",
+        "--all",
+        action="store_true",
+        help="Include disabled repositories",
+    )
+    repo_list.set_defaults(func=cmd_repo, repo_command="list")
+
+    repo_add = repo_sub.add_parser("add", help="Register a repository")
+    repo_add.add_argument("name", help="Repository as owner/name or its GitHub URL")
+    repo_add.set_defaults(func=cmd_repo, repo_command="add")
+
+    repo_remove = repo_sub.add_parser("remove", help="Unregister a repository")
+    repo_remove.add_argument("name", help="Repository as owner/name")
+    repo_remove.set_defaults(func=cmd_repo, repo_command="remove")
+
+    repo_discover = repo_sub.add_parser(
+        "discover",
+        help="Register a GitHub user's repositories",
+    )
+    repo_discover.add_argument(
+        "-u",
+        "--user",
+        help="GitHub username (default: [github] user from config.toml)",
+    )
+    repo_discover.add_argument(
+        "--include-forks",
+        action="store_true",
+        help="Register forks too",
+    )
+    repo_discover.add_argument(
+        "--include-archived",
+        action="store_true",
+        help="Register archived repositories too",
+    )
+    repo_discover.add_argument(
+        "--no-probe",
+        action="store_true",
+        help="Skip the per-repository workflow count (one request each)",
+    )
+    repo_discover.set_defaults(func=cmd_repo, repo_command="discover")
+
+    repo_parser.set_defaults(func=cmd_repo, repo_command="list")
 
     # init command
     init_parser = subparsers.add_parser(
